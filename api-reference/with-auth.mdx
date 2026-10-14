@@ -1,0 +1,166 @@
+---
+title: "withAuth — Low-Level Auth Data Access"
+sidebarTitle: "withAuth"
+description: "withAuth reads the current session from cookies and returns user data without triggering token refresh — for API routes and middleware that need raw auth access."
+---
+
+`withAuth` is a lower-level alternative to `authkitLoader`. Where `authkitLoader` manages the full session lifecycle — verifying the access token, refreshing it if expired, and writing an updated `Set-Cookie` header — `withAuth` simply decrypts and reads the existing session cookie as-is. It performs **no** token refresh, makes **no** changes to cookies, and issues **no** automatic redirects. When a session is present and the access token is still valid, `withAuth` returns the user's claims (including `accessToken` as a direct property). When there is no session or the token has expired, it returns `{ user: null }`.
+
+This makes `withAuth` the right choice for cases where you want to inspect auth state without the overhead or side effects of a full loader — for example, in API action routes, resource routes, or utility functions — provided that a parent or root route is already using `authkitLoader` to handle token refresh transparently.
+
+## Import
+
+```ts
+import { withAuth } from '@workos-inc/authkit-react-router';
+```
+
+## Signature
+
+```ts
+withAuth(args: LoaderFunctionArgs): Promise<UserInfo | NoUserInfo>
+```
+
+## Parameters
+
+<ParamField path="args" type="LoaderFunctionArgs" required>
+  The loader arguments object passed by React Router. `withAuth` reads `args.request` to access the incoming `Cookie` header. Pass the full `args` object from your loader or action.
+</ParamField>
+
+## Returns
+
+### `UserInfo` — session present and token valid
+
+<ResponseField name="user" type="User" required>
+  The WorkOS `User` object for the authenticated user. Contains `id`, `email`, `firstName`, `lastName`, `profilePictureUrl`, `createdAt`, and other standard profile fields.
+</ResponseField>
+
+<ResponseField name="sessionId" type="string">
+  The WorkOS session ID extracted from the `sid` JWT claim.
+</ResponseField>
+
+<ResponseField name="organizationId" type="string | undefined">
+  The organization the user is currently acting within, from the `org_id` JWT claim. `undefined` when no organization context is active.
+</ResponseField>
+
+<ResponseField name="role" type="string | undefined">
+  The user's primary role within the current organization. `undefined` when no role is assigned or no organization context is active.
+</ResponseField>
+
+<ResponseField name="roles" type="string[] | undefined">
+  All roles assigned to the user within the current organization. `undefined` when none are assigned.
+</ResponseField>
+
+<ResponseField name="permissions" type="string[] | undefined">
+  Permissions granted to the user. `undefined` when not present in the token.
+</ResponseField>
+
+<ResponseField name="entitlements" type="string[] | undefined">
+  Entitlements granted to the user. `undefined` when not present in the token.
+</ResponseField>
+
+<ResponseField name="featureFlags" type="string[] | undefined">
+  Feature flags from the `feature_flags` JWT claim. `undefined` when not present. Note that `withAuth` always reads from the JWT — unlike `authkitLoader`, it does not integrate with the Feature Flags runtime client.
+</ResponseField>
+
+<ResponseField name="impersonator" type="Impersonator | undefined">
+  Set when a WorkOS admin is impersonating this user. Contains `email` and `reason`. `undefined` in all normal sessions.
+</ResponseField>
+
+<ResponseField name="accessToken" type="string">
+  The raw access token (JWT) from the decrypted session cookie. Available as a direct property — unlike `authkitLoader`, which keeps the access token server-side and provides it only through the `getAccessToken()` callback.
+</ResponseField>
+
+### `NoUserInfo` — no session or token expired
+
+<ResponseField name="user" type="null" required>
+  Always `null` when no valid session is found.
+</ResponseField>
+
+<ResponseField name="sessionId" type="undefined">
+  Always `undefined` when unauthenticated.
+</ResponseField>
+
+<ResponseField name="organizationId" type="undefined">
+  Always `undefined` when unauthenticated.
+</ResponseField>
+
+<ResponseField name="role" type="undefined">
+  Always `undefined` when unauthenticated.
+</ResponseField>
+
+<ResponseField name="roles" type="undefined">
+  Always `undefined` when unauthenticated.
+</ResponseField>
+
+<ResponseField name="permissions" type="undefined">
+  Always `undefined` when unauthenticated.
+</ResponseField>
+
+<ResponseField name="entitlements" type="undefined">
+  Always `undefined` when unauthenticated.
+</ResponseField>
+
+<ResponseField name="featureFlags" type="undefined">
+  Always `undefined` when unauthenticated.
+</ResponseField>
+
+<ResponseField name="impersonator" type="undefined">
+  Always `undefined` when unauthenticated.
+</ResponseField>
+
+<ResponseField name="accessToken" type="undefined">
+  Always `undefined` when unauthenticated.
+</ResponseField>
+
+## Example
+
+```tsx app/routes/account.tsx
+import { withAuth } from '@workos-inc/authkit-react-router';
+import { redirect, type LoaderFunctionArgs } from 'react-router';
+
+export const loader = async (args: LoaderFunctionArgs) => {
+  const auth = await withAuth(args);
+
+  if (!auth.user) {
+    // withAuth does not redirect automatically — handle it yourself
+    throw redirect('/login');
+  }
+
+  // accessToken is a direct property on the return value
+  const { accessToken, user, sessionId, organizationId } = auth;
+
+  // Use the access token for a server-side API call
+  const apiData = await fetch('https://api.example.com/account', {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  }).then((r) => r.json());
+
+  // Be deliberate about what you return — accessToken will be visible
+  // in browser devtools if you include it in the response
+  return {
+    user,
+    sessionId,
+    organizationId,
+    apiData,
+    // accessToken, // ⚠️ Only expose if client-side access is required
+  };
+};
+```
+
+## `withAuth` vs `authkitLoader`
+
+<Note>
+  **`withAuth` does not refresh tokens.** If the access token in the session cookie is expired, `withAuth` returns `{ user: null }` and logs a warning — it does not attempt a refresh or destroy the cookie. This means:
+
+  - `withAuth` alone is not sufficient for user-facing routes. Use `authkitLoader` (or a parent route that uses `authkitLoader`) so that expired tokens are refreshed transparently before the route renders.
+  - Any route using `withAuth` should be nested under a route that calls `authkitLoader`. The root or layout loader is a natural location for this.
+  - `withAuth` does **not** update cookies. If a refresh occurred in a parent loader, the new `Set-Cookie` header is written by that parent's response — `withAuth` inherits the already-valid token from the cookie on the same request.
+
+  In short: use `authkitLoader` for the session lifecycle; use `withAuth` when you need a lightweight, side-effect-free read of the current auth state.
+</Note>
+
+## When to Use `withAuth`
+
+- **API / resource routes** — action handlers or loader-based API endpoints where you only need to verify the caller's identity, not manage their session.
+- **Middleware-style utilities** — shared server functions that need to read auth claims without becoming part of the React Router loader chain.
+- **Direct `accessToken` access** — when you need the raw JWT string as a property rather than through the `getAccessToken()` callback pattern that `authkitLoader`'s custom loaders expose.
+- **Testing and inspection** — when you want to read the current session state without triggering any side effects (refreshes, cookie writes, or redirects).

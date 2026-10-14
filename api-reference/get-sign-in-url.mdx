@@ -1,0 +1,73 @@
+---
+title: "getSignInUrl — Build a WorkOS Sign-In Authorization URL"
+sidebarTitle: "getSignInUrl"
+description: "getSignInUrl builds a PKCE-protected WorkOS AuthKit sign-in URL and returns the Set-Cookie header required for CSRF and PKCE verification."
+---
+
+`getSignInUrl` builds a PKCE-protected WorkOS AuthKit authorization URL for the sign-in flow and returns both the URL and a short-lived `Set-Cookie` header. The cookie binds the authorization code to the browser that started the flow, providing CSRF and PKCE protection. Because the cookie and the redirect URL must leave the server on the **same response**, the returned `headers` must be forwarded to the browser on the redirect — they cannot be stored in loader data or rendered in a `<Link>` component.
+
+## Import
+
+```ts
+import { getSignInUrl } from '@workos-inc/authkit-react-router';
+```
+
+## Signature
+
+```ts
+getSignInUrl(returnPathname?: string, request?: Request): Promise<GetAuthURLResult>
+```
+
+## Parameters
+
+<ParamField path="returnPathname" type="string" optional>
+  The pathname to redirect the user to after a successful sign-in (e.g. `"/dashboard"`). When provided, it is sealed into the OAuth `state` parameter and honored by the callback handler. If omitted, the callback falls back to the `returnPathname` configured in `authLoader`.
+</ParamField>
+
+<ParamField path="request" type="Request" optional>
+  The incoming Fetch `Request` from your loader. When provided, the PKCE cookie's `Secure` attribute is derived from the live request protocol rather than the configured `redirectUri`. This is important in local development, where your app may run on `http://localhost` even if `WORKOS_REDIRECT_URI` is an `https://` URL — without it, the browser silently drops a `Secure` cookie and the callback fails with `Auth cookie missing`.
+</ParamField>
+
+## Returns
+
+<ResponseField name="url" type="string">
+  The fully-formed WorkOS AuthKit authorization URL to redirect the user to. This URL includes the PKCE code challenge, CSRF state, and any other required OAuth parameters.
+</ResponseField>
+
+<ResponseField name="headers" type="object">
+  An object of shape `{ 'Set-Cookie': string }` containing the short-lived HttpOnly PKCE/CSRF-binding cookie. This object is directly usable as `HeadersInit`, so it can be spread into a `new Headers(...)` or passed straight to `redirect(url, { headers })`.
+</ResponseField>
+
+## Usage
+
+Create a dedicated redirect route for sign-in. Link to that route from anywhere in your app that needs a sign-in link.
+
+```ts
+// app/routes/login.ts
+import { redirect, type LoaderFunctionArgs } from 'react-router';
+import { getSignInUrl } from '@workos-inc/authkit-react-router';
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  const url = new URL(request.url);
+  const { url: authUrl, headers } = await getSignInUrl(
+    url.searchParams.get('returnTo') ?? undefined,
+    request,
+  );
+  return redirect(authUrl, { headers });
+}
+```
+
+Then link to `/login` from any page:
+
+```tsx
+import { Link } from 'react-router';
+
+<Link to="/login">Sign in</Link>
+
+// With a returnTo destination:
+<Link to="/login?returnTo=/dashboard">Sign in</Link>
+```
+
+<Warning>
+  The `headers` returned by `getSignInUrl` **must** be attached to the redirect response that sends the user to WorkOS. Do not return them as loader data, store them in session state, or render the URL inside a `<Link>` component. The PKCE cookie and the authorization URL must travel to the browser together on the same HTTP response — separating them breaks CSRF and PKCE verification and causes the callback to fail.
+</Warning>

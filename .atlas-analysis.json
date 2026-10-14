@@ -1,0 +1,120 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "AuthKit React Router",
+  "projectDescription": "A TypeScript library providing authentication and session management helpers for integrating WorkOS & AuthKit with React Router 7+ applications.",
+  "theme": "luma",
+  "primaryColor": "#5468ff",
+  "lightColor": "#f44452",
+  "darkColor": "#141414",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "configuration"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "guides/session-management",
+              "guides/protecting-routes",
+              "guides/sign-in-sign-out",
+              "guides/public-client-mode"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "guides/feature-flags",
+              "guides/custom-session-storage",
+              "guides/access-tokens",
+              "guides/organization-switching",
+              "guides/custom-auth-flows"
+            ]
+          },
+          {
+            "group": "Migration & Troubleshooting",
+            "pages": [
+              "guides/migrating-from-0-4",
+              "guides/troubleshooting"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Loaders",
+            "pages": [
+              "api-reference/authkit-loader",
+              "api-reference/auth-loader",
+              "api-reference/with-auth"
+            ]
+          },
+          {
+            "group": "Auth Helpers",
+            "pages": [
+              "api-reference/get-sign-in-url",
+              "api-reference/get-sign-up-url",
+              "api-reference/sign-out",
+              "api-reference/switch-to-organization"
+            ]
+          },
+          {
+            "group": "Session & Config",
+            "pages": [
+              "api-reference/configure",
+              "api-reference/save-session",
+              "api-reference/refresh-session",
+              "api-reference/get-workos",
+              "api-reference/get-feature-flags-runtime-client"
+            ]
+          },
+          {
+            "group": "Types",
+            "pages": [
+              "api-reference/types"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Drop-in authkitLoader for automatic session management and token refresh in React Router loaders",
+    "PKCE + CSRF protection on all OAuth authorization-code flows",
+    "Public (keyless) client mode — sign-in without a server-held API key",
+    "Encrypted, HttpOnly cookie-based session storage with configurable or custom storage backends",
+    "Feature Flags runtime client for server-side flag evaluation independent of JWT claims",
+    "Organization switching with refreshSession",
+    "Fine-grained auth data: user, sessionId, organizationId, role, roles, permissions, entitlements, featureFlags, impersonator",
+    "ensureSignedIn option to enforce authentication and redirect anonymous users automatically",
+    "Debug logging via the debug option on authkitLoader",
+    "Flexible configuration via environment variables, programmatic configure(), or a custom value source"
+  ],
+  "publicApiSurface": [
+    "authkitLoader(loaderArgs, loaderOrOptions?, options?)",
+    "authLoader(options?)",
+    "withAuth(args)",
+    "getSignInUrl(returnPathname?, request?)",
+    "getSignUpUrl(returnPathname?, request?)",
+    "signOut(request, options?)",
+    "switchToOrganization(request, organizationId, options?)",
+    "configure(configOrSource, source?)",
+    "getConfig(key)",
+    "saveSession(sessionOrResponse, request)",
+    "refreshSession(request, options?)",
+    "getWorkOS()",
+    "getFeatureFlagsRuntimeClient(options?)",
+    "AuthKitConfig (type)",
+    "AuthKitConfidentialConfig (type)",
+    "AuthKitPublicConfig (type)"
+  ]
+}

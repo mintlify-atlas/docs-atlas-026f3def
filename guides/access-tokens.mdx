@@ -1,0 +1,133 @@
+---
+title: "Working with Access Tokens in AuthKit React Router"
+sidebarTitle: "Access Tokens"
+description: "Access JWTs securely in route loaders via getAccessToken(), understand security defaults, and decide when to expose tokens to client-side code."
+---
+
+Access tokens issued by WorkOS are JWTs that carry the user's identity and session claims. In `authkitLoader`, access tokens are **not** included in the data sent to React components by default. Instead, they are made available through a `getAccessToken()` function that is only callable inside your loader — keeping the raw JWT on the server unless you explicitly decide otherwise.
+
+## Getting the Access Token
+
+To use an access token, pass a loader function as the second argument to `authkitLoader`. The loader receives `{ auth, getAccessToken, ...loaderArgs }`. Call `getAccessToken()` to retrieve the token:
+
+```tsx
+import { data, type LoaderFunctionArgs } from 'react-router';
+import { authkitLoader } from '@workos-inc/authkit-react-router';
+
+export const loader = (args: LoaderFunctionArgs) =>
+  authkitLoader(args, async ({ auth, getAccessToken }) => {
+    if (!auth.user) {
+      // User is not signed in — getAccessToken() returns null
+      return data({ data: null });
+    }
+
+    // Call getAccessToken() explicitly to retrieve the JWT
+    const accessToken = getAccessToken();
+
+    const serviceData = await fetch('/api/path', {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+
+    return data({
+      data: await serviceData.json(),
+    });
+  });
+```
+
+`getAccessToken()` returns `string | null`. It returns `null` when no user is signed in. When a user is authenticated, it returns the current access token string (a signed JWT).
+
+## Security Defaults
+
+<Warning>
+  Access tokens are **not** sent to React components by default. This is intentional. Including a
+  raw JWT in loader data exposes it to:
+
+  - **Browser developer tools** — the token appears in the Network tab and React DevTools.
+  - **HTML source code** — server-rendered pages may embed the token in inline JSON.
+  - **Client-side error reporting** — tools like Sentry or Datadog can capture loader data in error
+    reports, inadvertently leaking the token.
+
+  Always prefer making authenticated requests server-side inside your loader rather than forwarding
+  the token to the browser.
+</Warning>
+
+## Exposing the Token to the Client
+
+If your application genuinely needs to make authenticated requests from the browser (for example, calling a third-party API directly from a React component), you can explicitly return the token from your loader:
+
+```tsx
+export const loader = (args: LoaderFunctionArgs) =>
+  authkitLoader(
+    args,
+    async ({ auth, getAccessToken }) => {
+      const accessToken = getAccessToken();
+
+      return {
+        // Only expose to the client if absolutely necessary
+        accessToken,
+        userData: await fetchUserData(accessToken),
+      };
+    },
+    { ensureSignedIn: true },
+  );
+```
+
+Once returned from the loader, the access token is available in the component via `useLoaderData()` and will be visible in browser developer tools. Only do this when your use case requires it.
+
+## With `ensureSignedIn`
+
+When `ensureSignedIn: true` is set, unauthenticated users are redirected to AuthKit before the loader function runs. This means `getAccessToken()` is guaranteed to return a non-null string whenever your loader body executes:
+
+```tsx
+export const loader = (args: LoaderFunctionArgs) =>
+  authkitLoader(
+    args,
+    async ({ auth, getAccessToken }) => {
+      // ensureSignedIn: true guarantees auth.user is non-null
+      // and getAccessToken() always returns a string
+      const accessToken = getAccessToken() as string;
+
+      const protectedData = await fetchProtectedData(accessToken);
+
+      return { protectedData };
+    },
+    { ensureSignedIn: true },
+  );
+```
+
+Without `ensureSignedIn`, you should guard `getAccessToken()` with a check on `auth.user` (as shown in the first example) to handle unauthenticated requests safely.
+
+## Server-Side API Calls
+
+The recommended pattern is to make all authenticated API calls directly inside the loader, using the access token as a `Bearer` credential in the `Authorization` header:
+
+```tsx
+export const loader = (args: LoaderFunctionArgs) =>
+  authkitLoader(args, async ({ auth, getAccessToken }) => {
+    if (!auth.user) {
+      return data({ items: [] });
+    }
+
+    const accessToken = getAccessToken();
+
+    const response = await fetch('/api/path', {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+
+    return data({ items: await response.json() });
+  });
+```
+
+The token never leaves the server in this pattern — the API call is made during server-side rendering, and only the resulting data is serialized into the loader response.
+
+## Alternatives to Exposing Tokens
+
+Before returning an access token to the browser, consider these server-side alternatives:
+
+- **Make API calls in loaders** — fetch the data you need during server rendering and return only the result to the component. This is the most secure approach and works well for most use cases.
+- **Create proxy endpoints** — build a React Router action or API route in your application that makes the upstream request on the client's behalf, forwarding credentials server-to-server.
+- **Use separate client-scoped tokens** — if you control the API, issue a separate, narrowly-scoped token for browser use rather than forwarding the full WorkOS access token.

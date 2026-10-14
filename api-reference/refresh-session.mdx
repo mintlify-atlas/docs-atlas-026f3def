@@ -1,0 +1,145 @@
+---
+title: "refreshSession — Manually Refresh the User Session"
+sidebarTitle: "refreshSession"
+description: "refreshSession exchanges the stored refresh token for a new access token and returns updated auth data — use for manual session refresh or organization switching."
+---
+
+`refreshSession` manually exchanges the stored refresh token for a new access token and returns updated session data. In most cases you don't need to call this directly — `authkitLoader` handles automatic refresh transparently whenever the access token has expired. Use `refreshSession` when you need direct control over the refresh lifecycle, such as:
+
+- Switching the authenticated user to a different organization mid-session without a full re-login.
+- Explicitly refreshing after a user updates their profile or permissions.
+- Building custom action handlers where you need fresh claims immediately.
+
+## Import
+
+```ts
+import { refreshSession } from '@workos-inc/authkit-react-router';
+```
+
+## Signature
+
+```ts
+refreshSession(
+  request: Request,
+  options?: { organizationId?: string },
+): Promise<RefreshResult>
+```
+
+## Parameters
+
+<ParamField body="request" type="Request" required>
+  The incoming `Request` from the current loader or action. Used to read the existing `Cookie` header and locate the sealed session.
+</ParamField>
+
+<ParamField body="options.organizationId" type="string" optional>
+  When provided, the refresh token exchange asks WorkOS to issue a new access token scoped to this organization. Use this to switch the user's active organization without requiring them to sign in again.
+</ParamField>
+
+## Returns
+
+<ResponseField name="RefreshResult" type="object">
+  An object containing the refreshed session data and the `Set-Cookie` header to send back to the browser.
+
+  <Expandable title="Return fields">
+    <ResponseField name="user" type="User">
+      The authenticated WorkOS `User` object.
+    </ResponseField>
+
+    <ResponseField name="sessionId" type="string">
+      The WorkOS session ID (`sid` JWT claim).
+    </ResponseField>
+
+    <ResponseField name="accessToken" type="string">
+      The newly issued access token.
+    </ResponseField>
+
+    <ResponseField name="organizationId" type="string | undefined">
+      The organization ID encoded in the new access token's `org_id` claim, if any.
+    </ResponseField>
+
+    <ResponseField name="role" type="string | undefined">
+      The user's role within the organization, from the access token's `role` claim.
+    </ResponseField>
+
+    <ResponseField name="roles" type="string[] | undefined">
+      All roles assigned to the user, from the access token's `roles` claim.
+    </ResponseField>
+
+    <ResponseField name="permissions" type="string[] | undefined">
+      Permissions granted to the user, from the access token's `permissions` claim.
+    </ResponseField>
+
+    <ResponseField name="entitlements" type="string[] | undefined">
+      Entitlements granted to the user, from the access token's `entitlements` claim.
+    </ResponseField>
+
+    <ResponseField name="featureFlags" type="string[] | undefined">
+      Feature flags enabled for the user, from the access token's `feature_flags` claim.
+    </ResponseField>
+
+    <ResponseField name="impersonator" type="Impersonator | null">
+      Present when an admin is impersonating this user. Contains `email` and `reason`.
+    </ResponseField>
+
+    <ResponseField name="sealedSession" type="string | undefined">
+      The raw sealed JWT value from the session cookie, if available.
+    </ResponseField>
+
+    <ResponseField name="headers" type='Record<string, string>'>
+      Contains `{ "Set-Cookie": "<new-sealed-session-cookie>" }`. Must be returned in your response to persist the refreshed session.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Example
+
+### Refresh in an action and use the new access token
+
+```ts
+import { type ActionFunctionArgs } from 'react-router';
+import { refreshSession } from '@workos-inc/authkit-react-router';
+
+export async function action({ request }: ActionFunctionArgs) {
+  // Exchange the stored refresh token for a new access token
+  const { accessToken, user, headers } = await refreshSession(request);
+
+  // Use the fresh token to call a downstream API
+  await fetch('https://api.example.com/profile', {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(await request.json()),
+  });
+
+  // Return any response data along with the updated session cookie
+  return Response.json(
+    { success: true, user },
+    { headers },
+  );
+}
+```
+
+### Switching to a different organization
+
+```ts
+import { type ActionFunctionArgs, redirect } from 'react-router';
+import { refreshSession } from '@workos-inc/authkit-react-router';
+
+export async function action({ request }: ActionFunctionArgs) {
+  const formData = await request.formData();
+  const targetOrgId = formData.get('organizationId') as string;
+
+  const { headers } = await refreshSession(request, {
+    organizationId: targetOrgId,
+  });
+
+  // Redirect to the org dashboard with the refreshed, org-scoped session
+  return redirect('/dashboard', { headers });
+}
+```
+
+<Note>
+  If no valid session exists in the request cookies, `refreshSession` throws a redirect to the WorkOS authorization URL so the user can sign in. If the stored refresh token has expired or been revoked, `refreshSession` also throws a redirect. In both cases the thrown `Response` is a `redirect` and will be caught by React Router's error boundary or propagated automatically if you use `throw`.
+</Note>

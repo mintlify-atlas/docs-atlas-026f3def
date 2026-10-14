@@ -1,0 +1,106 @@
+---
+title: "getFeatureFlagsRuntimeClient — WorkOS Feature Flags Client"
+sidebarTitle: "getFeatureFlagsRuntimeClient"
+description: "getFeatureFlagsRuntimeClient returns a shared WorkOS Feature Flags runtime client for server-side flag evaluation independent of the user's access token."
+---
+
+By default, `authkitLoader` reads feature flags from the `feature_flags` claim embedded in the WorkOS access token. This is lightweight and requires no extra network calls, but it means flag changes are only reflected after the access token is next refreshed — which can be up to an hour by default.
+
+`getFeatureFlagsRuntimeClient` gives you a live connection to the WorkOS Feature Flags service. The runtime client keeps its flag configuration in memory and syncs changes in the background, so flag evaluations reflect the current state rather than the state at the time the last access token was minted. This is the right choice when you need near-real-time flag changes, server-side targeting by `userId` or `organizationId`, or flag evaluation that is fully independent of the user's session.
+
+## Import
+
+```ts
+import { getFeatureFlagsRuntimeClient } from '@workos-inc/authkit-react-router';
+```
+
+## Signature
+
+```ts
+getFeatureFlagsRuntimeClient(options?: RuntimeClientOptions): FeatureFlagsRuntimeClient
+```
+
+## Parameters
+
+<ParamField body="options" type="RuntimeClientOptions" optional>
+  Options forwarded to the underlying `workos.featureFlags.createRuntimeClient()` call. **Only applied on the very first call** — subsequent calls return the existing singleton and ignore any new options. Create the client once at module level (outside of loaders/actions) to avoid confusion.
+</ParamField>
+
+## Returns
+
+<ResponseField name="FeatureFlagsRuntimeClient" type="FeatureFlagsRuntimeClient">
+  The WorkOS Feature Flags runtime client. The same instance is returned for every call in the current server process. Pass this value to `authkitLoader`'s `featureFlags.runtimeClient` option to enable runtime flag evaluation.
+</ResponseField>
+
+## Example
+
+### Using with `authkitLoader`
+
+Create the runtime client once at module scope, then pass it to `authkitLoader` via the `featureFlags` option. This ensures a single client is shared across all requests rather than creating a new connection per request.
+
+```tsx
+import { type LoaderFunctionArgs, useLoaderData } from 'react-router';
+import {
+  authkitLoader,
+  getFeatureFlagsRuntimeClient,
+} from '@workos-inc/authkit-react-router';
+
+// Create once — reused for every request
+const featureFlags = getFeatureFlagsRuntimeClient();
+
+export const loader = (args: LoaderFunctionArgs) =>
+  authkitLoader(args, {
+    featureFlags: {
+      runtimeClient: featureFlags,
+      // Wait up to 5 s for the client to finish its initial sync before
+      // evaluating flags. Prevents a cold-start from returning stale values.
+      waitUntilReady: { timeoutMs: 5000 },
+    },
+    onFeatureFlagsError: ({ error }) => {
+      console.error('Feature flags runtime client failed:', error);
+    },
+  });
+
+export function Dashboard() {
+  const { featureFlags } = useLoaderData<typeof loader>();
+  const hasAdvancedAnalytics = featureFlags?.includes('advanced-analytics');
+
+  return hasAdvancedAnalytics ? <AdvancedAnalytics /> : <BasicAnalytics />;
+}
+```
+
+When `featureFlags.runtimeClient` is set, `authkitLoader` evaluates flags using the signed-in user's `userId` and `organizationId` as the evaluation context. If runtime evaluation fails for any reason, `authkitLoader` falls back to the access token's `feature_flags` claim so authentication continues uninterrupted. Use `onFeatureFlagsError` to capture this fallback in your monitoring system.
+
+## Singleton Behavior
+
+<Note>
+  `getFeatureFlagsRuntimeClient` returns the **same client instance** for every call within a single server process. Options passed after the first call are silently ignored.
+
+  For this reason, always create the client **once at module level**, outside of request handlers:
+
+  ```ts
+  // ✅ Correct — created once, shared across requests
+  const featureFlags = getFeatureFlagsRuntimeClient({ /* options */ });
+
+  export const loader = (args) => authkitLoader(args, {
+    featureFlags: { runtimeClient: featureFlags },
+  });
+
+  // ❌ Incorrect — options on repeated calls are ignored; also creates
+  //    unnecessary per-request overhead
+  export const loader = (args) => authkitLoader(args, {
+    featureFlags: { runtimeClient: getFeatureFlagsRuntimeClient({ /* options */ }) },
+  });
+  ```
+</Note>
+
+<Warning>
+  `getFeatureFlagsRuntimeClient` requires a WorkOS API key. In public-client (keyless) mode — when neither `WORKOS_API_KEY` nor `configure({ apiKey })` is set — calling this function throws:
+
+  ```
+  Feature flags require a WorkOS API key; set WORKOS_API_KEY or configure({ apiKey }).
+  Public-client (keyless) mode supports sign-in only.
+  ```
+
+  Ensure `WORKOS_API_KEY` is set in your environment (or supply `apiKey` via [`configure`](/api-reference/configure)) before calling `getFeatureFlagsRuntimeClient`.
+</Warning>

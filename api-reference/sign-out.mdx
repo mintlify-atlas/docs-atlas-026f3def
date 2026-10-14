@@ -1,0 +1,76 @@
+---
+title: "signOut — Terminate the User Session"
+sidebarTitle: "signOut"
+description: "signOut destroys the session cookie, calls the WorkOS logout endpoint, and redirects the user — with an optional returnTo URL for post-logout destination."
+---
+
+`signOut` terminates the user's WorkOS session, destroys the encrypted session cookie on the browser, and redirects the user. By default, WorkOS redirects to the homepage URL configured in your WorkOS dashboard under **Redirect** settings. An optional `returnTo` URL lets you override that destination — the value must be registered as an allowed logout redirect in your WorkOS dashboard.
+
+## Import
+
+```ts
+import { signOut } from '@workos-inc/authkit-react-router';
+```
+
+## Signature
+
+```ts
+signOut(request: Request, options?: { returnTo?: string }): Promise<Response>
+```
+
+## Parameters
+
+<ParamField path="request" type="Request" required>
+  The incoming Fetch `Request` from your action or loader. Used to read the current session cookie so the session can be properly terminated.
+</ParamField>
+
+<ParamField path="options.returnTo" type="string" optional>
+  A URL to redirect the user to after they have been signed out. Must be registered as an allowed logout redirect URL in the WorkOS dashboard under **Logout redirects**. If omitted, WorkOS redirects to the default post-logout destination configured in your dashboard.
+</ParamField>
+
+## Returns
+
+<ResponseField name="Response" type="Response">
+  A redirect `Response` to the WorkOS logout endpoint. WorkOS then clears its own session state and redirects the user to either the `returnTo` URL or the default post-logout destination configured in your dashboard. The response also instructs the browser to expire the session cookie.
+</ResponseField>
+
+## Usage
+
+The recommended pattern is to trigger sign-out from an HTML `<Form>` with `method="post"`. This sends a `POST` request to your route's action, which calls `signOut` and returns the redirect response.
+
+```tsx
+// app/routes/_index.tsx
+import { type ActionFunctionArgs, type LoaderFunctionArgs, Form, useLoaderData } from 'react-router';
+import { signOut, authkitLoader } from '@workos-inc/authkit-react-router';
+
+export const loader = (args: LoaderFunctionArgs) => authkitLoader(args);
+
+export async function action({ request }: ActionFunctionArgs) {
+  return await signOut(request);
+}
+
+export default function HomePage() {
+  const { user } = useLoaderData<typeof loader>();
+
+  return (
+    <Form method="post">
+      <p>Welcome back{user?.firstName && `, ${user.firstName}`}</p>
+      <button type="submit">Sign out</button>
+    </Form>
+  );
+}
+```
+
+## With `returnTo`
+
+To redirect the user to a specific URL after sign-out, pass the `returnTo` option. The URL must be pre-registered in your WorkOS dashboard.
+
+```ts
+export async function action({ request }: ActionFunctionArgs) {
+  return await signOut(request, { returnTo: 'https://example.com' });
+}
+```
+
+<Note>
+  The default redirect destination after sign-out is configured in the WorkOS dashboard under **Redirect** settings. The `returnTo` option only overrides this when the provided URL is listed under **Logout redirects** in your WorkOS dashboard. Providing an unregistered URL will result in an error from WorkOS.
+</Note>

@@ -1,0 +1,75 @@
+---
+title: "AuthKit React Router: WorkOS Auth for React Router 7+"
+sidebarTitle: "Introduction"
+description: "AuthKit React Router adds WorkOS-powered authentication to React Router 7+ apps. Learn what the library provides and how it fits into your project."
+---
+
+`@workos-inc/authkit-react-router` is the official WorkOS authentication library for React Router 7+ applications running in framework mode (Remix-style). It wraps the WorkOS User Management and AuthKit APIs into a set of ready-to-use loader helpers, so you can add secure, production-grade sign-in to your app without writing OAuth plumbing by hand. Out of the box you get encrypted cookie sessions, automatic access-token refresh, PKCE + CSRF protection on every authorization-code flow, and a fully keyless ("public client") operating mode for services that should never hold a server secret.
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="authkitLoader" icon="shield-check">
+    A drop-in React Router loader that reads (or refreshes) the encrypted session on every request and hands `user`, `sessionId`, `organizationId`, `role`, `permissions`, `entitlements`, `featureFlags`, and `impersonator` directly to your component via `useLoaderData`.
+  </Card>
+  <Card title="PKCE + CSRF Protection" icon="lock">
+    Every authorization-code flow is hardened with PKCE and a nonce-bound CSRF check. The code verifier lives only in a short-lived `HttpOnly` cookie — never in the URL — so a leaked callback link cannot complete a code exchange on its own.
+  </Card>
+  <Card title="Public-Client (Keyless) Mode" icon="key">
+    Leave `WORKOS_API_KEY` unset and AuthKit runs as a PKCE OAuth public client. Sign-in, sign-up, callback, session refresh, organization switching, and sign-out all work without a server-side secret key.
+  </Card>
+  <Card title="Encrypted Cookie Sessions" icon="cookie">
+    Sessions are sealed with [iron-session](https://github.com/vvo/iron-session) using your `WORKOS_COOKIE_PASSWORD`. The access token and refresh token never leave the server unencrypted. Bring your own `SessionStorage` — memory, Redis, database — or use the default cookie-based store.
+  </Card>
+  <Card title="Feature Flags Runtime Client" icon="flag">
+    Opt in to server-side feature flag evaluation via `getFeatureFlagsRuntimeClient()`. The runtime client keeps flag state in memory and syncs in the background, so flag changes propagate independently of a user's token refresh cycle.
+  </Card>
+  <Card title="Organization Switching" icon="buildings">
+    `switchToOrganization(request, organizationId)` refreshes the session into a new organizational context and returns updated auth claims — or redirects to re-authentication when SSO or MFA enrollment is required for that organization.
+  </Card>
+</CardGroup>
+
+## How It Works
+
+AuthKit React Router implements the **OAuth 2.0 authorization-code flow with PKCE**:
+
+1. **User clicks sign-in** — your `/login` route calls `getSignInUrl()`, which generates a code-verifier + nonce pair. The verifier is sealed into a short-lived `HttpOnly` cookie; the nonce is sealed into the URL `state` parameter. Both the redirect and the `Set-Cookie` header travel to the browser together.
+2. **Redirect to WorkOS AuthKit** — the user authenticates on the WorkOS-hosted UI (password, SSO, magic link, etc.).
+3. **Callback with authorization code** — WorkOS redirects back to your callback route with `?code=…&state=…`.
+4. **PKCE + CSRF verification** — `authLoader` recovers the code verifier from the `HttpOnly` cookie and checks that the nonce in the URL state matches the nonce in the cookie, binding the callback to the browser that started the flow.
+5. **Code exchange for tokens** — the verified code and verifier are exchanged with WorkOS for an access token and a refresh token.
+6. **Encrypted session cookie** — the tokens and user profile are sealed into an encrypted `Set-Cookie` header that is written to the browser.
+7. **Subsequent requests** — `authkitLoader` decrypts the session cookie on each request. If the access token has expired, it transparently refreshes it using the refresh token and writes a new `Set-Cookie` header, keeping the user logged in with no visible interruption.
+
+## Requirements
+
+| Requirement | Version |
+|---|---|
+| Node.js | `>=20.15.0` |
+| React Router | `^7.2.0` |
+| React | `^18.0` or `^19.0.0` |
+| react-dom | `^18.0` or `^19.0.0` |
+
+The library also depends on `@workos-inc/node ^8.13.0`, `iron-session ^8.0.1`, `jose ^5.2.3`, and `valibot ^1.2.0`, which are installed automatically as direct dependencies.
+
+## Installation
+
+<CodeGroup>
+
+```bash npm
+npm install @workos-inc/authkit-react-router
+```
+
+```bash yarn
+yarn add @workos-inc/authkit-react-router
+```
+
+```bash pnpm
+pnpm add @workos-inc/authkit-react-router
+```
+
+</CodeGroup>
+
+<Note>
+  This library targets React Router **framework mode** (the Remix-style setup with file-based routing, loaders, and actions). It is not designed for React Router **library mode**, where you manage your own router directly. More library-mode support is planned for future releases.
+</Note>

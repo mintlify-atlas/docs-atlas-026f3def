@@ -1,0 +1,132 @@
+---
+title: "Custom Session Storage for AuthKit React Router"
+sidebarTitle: "Custom Session Storage"
+description: "Replace the default cookie session storage with memory, Redis, or database-backed implementations compatible with React Router's SessionStorage interface."
+---
+
+By default, AuthKit for React Router uses `createCookieSessionStorage` from React Router to persist the encrypted session in a browser cookie. Any implementation that satisfies React Router's `SessionStorage` interface can be used as a drop-in replacement — including in-memory storage for tests, Redis-backed stores for distributed deployments, or database-backed implementations for custom retention requirements.
+
+## Default Cookie Settings
+
+When no custom storage is provided, AuthKit creates a cookie session with the following configuration:
+
+```typescript
+{
+  name: "wos-session",       // Default, or WORKOS_COOKIE_NAME if set
+  path: "/",
+  httpOnly: true,
+  secure: true,              // true when the redirect URI uses HTTPS
+  sameSite: "lax",
+  maxAge: 34560000,          // 400 days (configurable via WORKOS_COOKIE_MAX_AGE)
+  secrets: [/* your WORKOS_COOKIE_PASSWORD value */],
+}
+```
+
+The `secure` flag is derived from the protocol of your `WORKOS_REDIRECT_URI` — if the redirect URI uses `https://`, cookies are marked `Secure`. The `secrets` array is populated from your configured `cookiePassword` (minimum 32 characters).
+
+## Custom Storage Example
+
+Pass a `storage` instance and a matching `cookie` object (at minimum providing `name`) to both `authkitLoader` and `authLoader`. Both must use the same configuration so the session written by the callback route is readable by all other routes.
+
+```typescript
+import { createMemorySessionStorage } from '@react-router/node';
+import { authkitLoader, authLoader } from '@workos-inc/authkit-react-router';
+
+// Create memory-based session storage (useful for testing)
+const memoryStorage = createMemorySessionStorage({
+  cookie: {
+    name: 'auth-session',
+    secrets: ['test-secret'],
+    sameSite: 'lax',
+    path: '/',
+    httpOnly: true,
+    secure: false, // Use false for local testing
+    maxAge: 60 * 60 * 24, // 1 day
+  },
+});
+
+// In your main route loader
+export const loader = (args) =>
+  authkitLoader(args, {
+    storage: memoryStorage,
+    cookie: { name: 'auth-session' },
+  });
+
+// In your callback route
+export const loader = authLoader({
+  storage: memoryStorage,
+  cookie: { name: 'auth-session' },
+});
+```
+
+The `storage` option accepts the full `SessionStorage` instance. The `cookie` option tells AuthKit which cookie name to look up within that storage; it must match the `name` used when creating the storage instance.
+
+## Shared Storage Helper
+
+To avoid duplicating the storage configuration across every route file, extract it into a shared helper module:
+
+```typescript
+// app/lib/session.ts
+import { createCookieSessionStorage } from 'react-router';
+
+export function getAuthStorage() {
+  const storage = createCookieSessionStorage({
+    cookie: {
+      name: 'my-custom-session',
+      secrets: [process.env.WORKOS_COOKIE_PASSWORD],
+      sameSite: 'lax',
+      path: '/',
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: 60 * 60 * 24 * 30, // 30 days
+    },
+  });
+
+  return { storage, cookie: { name: 'my-custom-session' } };
+}
+```
+
+Then spread the returned object into `authkitLoader` and `authLoader` across your routes:
+
+```typescript
+// In any route that needs authentication
+import { getAuthStorage } from '~/lib/session';
+
+export const loader = (args) =>
+  authkitLoader(args, {
+    ...getAuthStorage(),
+    // Other options (ensureSignedIn, debug, etc.)
+  });
+```
+
+```typescript
+// In your callback route
+import { authLoader } from '@workos-inc/authkit-react-router';
+import { getAuthStorage } from '~/lib/session';
+
+export const loader = authLoader({
+  ...getAuthStorage(),
+});
+```
+
+## Serverless Considerations
+
+<Note>
+  When deploying to serverless or Function-as-a-Service environments (AWS Lambda, Vercel Functions,
+  Cloudflare Workers, etc.), each cold start creates a fresh process with no shared state. Pass the
+  same storage configuration explicitly to both your main routes and the callback route on every
+  invocation to ensure the session written during the OAuth callback can always be read by
+  subsequent requests.
+</Note>
+
+## Supported Storage Types
+
+AuthKit works with any object that implements React Router's `SessionStorage` interface. This includes:
+
+- **Cookie storage** — `createCookieSessionStorage` (default). Self-contained; no external infrastructure required.
+- **Memory storage** — `createMemorySessionStorage`. Useful for testing; does not persist across process restarts.
+- **Redis-backed storage** — community adapters such as `connect-redis` wrapped in a compatible interface.
+- **Database-backed storage** — any custom implementation backed by PostgreSQL, MySQL, DynamoDB, etc.
+- **File-based storage** — `createFileSessionStorage` (Node.js only).
+
+The only requirement is that the implementation exposes the `getSession`, `commitSession`, and `destroySession` methods defined by React Router's `SessionStorage` interface.

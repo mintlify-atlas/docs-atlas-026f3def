@@ -1,20 +1,97 @@
 ---
-title: "Introduction"
-description: "Welcome to your project"
+title: "AuthKit React Router: WorkOS Auth for React Router 7+"
+sidebarTitle: "Home"
+description: "Add enterprise-grade authentication to your React Router 7+ app with WorkOS AuthKit. Session management, PKCE, feature flags, and more — in minutes."
 ---
 
-Write a short description of your product here. What it does, who it's for, and what they can accomplish with it.
+AuthKit React Router is the official WorkOS library for adding authentication and session management to React Router 7+ applications. It provides drop-in loader helpers that handle the full OAuth flow — PKCE code exchange, encrypted cookie sessions, automatic token refresh, and sign-out — so you can focus on building your app rather than auth infrastructure.
 
-<Tip>
-  Ready to make this your own? Start by editing this page. Update your `docs.json` file to customize your site. Then fill out the [Quickstart](/quickstart) page.
-</Tip>
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="bolt" href="/quickstart">
+    Get a working authenticated route in under 5 minutes
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration">
+    Environment variables and programmatic setup options
+  </Card>
+  <Card title="Session Management" icon="shield-check" href="/guides/session-management">
+    How AuthKit manages tokens and refreshes sessions automatically
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference/authkit-loader">
+    Full reference for every exported function and type
+  </Card>
+</CardGroup>
 
-<Card title="Quickstart" icon="rocket" href="/quickstart">
-  This card links to the quickstart page in your project.
-</Card>
-<Card title="Components" icon="puzzle-piece" href="https://mintlify.com/docs/components">
-  Add cards, callouts, steps, tabs, and more to design and structure your pages.
-</Card>
-<Card title="Settings" icon="gear" href="https://mintlify.com/docs/organize/settings">
-  Set your site name, branding, and navigation in the `docs.json` file.
-</Card>
+## What AuthKit React Router provides
+
+AuthKit React Router wraps the WorkOS User Management API and exposes a small, focused set of React Router loader helpers. The core building blocks are:
+
+- **`authkitLoader`** — wraps your route loaders to automatically verify and refresh the user's session, exposing `user`, `sessionId`, `organizationId`, `role`, `permissions`, `entitlements`, `featureFlags`, and `impersonator` to your components.
+- **`authLoader`** — handles the OAuth callback route, exchanging the authorization code for tokens and writing the encrypted session cookie.
+- **`getSignInUrl` / `getSignUpUrl`** — build PKCE-protected authorization URLs for your login and signup redirect routes.
+- **`signOut`** — terminates the session and redirects the user.
+
+<CardGroup cols={2}>
+  <Card title="Protecting Routes" icon="lock" href="/guides/protecting-routes">
+    Redirect unauthenticated users with ensureSignedIn
+  </Card>
+  <Card title="Sign-In & Sign-Out" icon="arrow-right-to-bracket" href="/guides/sign-in-sign-out">
+    Build login, signup, and sign-out flows
+  </Card>
+  <Card title="Public Client Mode" icon="key" href="/guides/public-client-mode">
+    Run without a server-side API key using PKCE only
+  </Card>
+  <Card title="Feature Flags" icon="flag" href="/guides/feature-flags">
+    Server-side flag evaluation with the WorkOS runtime client
+  </Card>
+</CardGroup>
+
+## How it works
+
+<Steps>
+  <Step title="Install the package">
+    Add `@workos-inc/authkit-react-router` to your React Router 7+ project.
+
+    ```bash
+    npm install @workos-inc/authkit-react-router
+    ```
+  </Step>
+  <Step title="Set environment variables">
+    Add your WorkOS credentials to `.env.local`. Three variables are required; `WORKOS_API_KEY` is optional for public-client (keyless) mode.
+
+    ```bash .env.local
+    WORKOS_CLIENT_ID="client_..."
+    WORKOS_REDIRECT_URI="http://localhost:5173/callback"
+    WORKOS_COOKIE_PASSWORD="<at-least-32-character-secret>"
+    WORKOS_API_KEY="sk_test_..."  # optional
+    ```
+  </Step>
+  <Step title="Add the callback route">
+    Create a route that matches your redirect URI and export `authLoader` as its loader.
+
+    ```ts app/routes/callback.ts
+    import { authLoader } from '@workos-inc/authkit-react-router';
+
+    export const loader = authLoader();
+    ```
+  </Step>
+  <Step title="Protect your routes">
+    Wrap any route loader with `authkitLoader` to get authenticated user data — or redirect automatically with `ensureSignedIn`.
+
+    ```tsx app/routes/dashboard.tsx
+    import { type LoaderFunctionArgs, useLoaderData } from 'react-router';
+    import { authkitLoader } from '@workos-inc/authkit-react-router';
+
+    export const loader = (args: LoaderFunctionArgs) =>
+      authkitLoader(args, { ensureSignedIn: true });
+
+    export default function Dashboard() {
+      const { user } = useLoaderData<typeof loader>();
+      return <h1>Welcome, {user.firstName}!</h1>;
+    }
+    ```
+  </Step>
+</Steps>
+
+<Note>
+  AuthKit React Router targets React Router 7+ in **framework mode** (i.e., Remix-style with loaders and server-side rendering). Library mode support is planned for future releases.
+</Note>

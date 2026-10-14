@@ -1,0 +1,155 @@
+---
+title: "Sign-In, Sign-Up, and Sign-Out with AuthKit"
+sidebarTitle: "Sign-In & Sign-Out"
+description: "Create dedicated redirect routes for sign-in and sign-up using PKCE-protected AuthKit URLs, and implement sign-out with session termination."
+---
+
+`getSignInUrl` and `getSignUpUrl` protect every authorization flow with [PKCE](https://oauth.net/2/pkce/) and CSRF binding. Each call returns `{ url, headers }` — not a bare URL string. The `headers` object contains a short-lived `Set-Cookie` that writes an HttpOnly PKCE verifier cookie to the browser. **This cookie must travel to the browser on the same redirect response that sends the user to WorkOS.** If you render the URL in a `<Link>` instead of redirecting from a loader, the cookie is never set and the callback will fail.
+
+The pattern is always: create a dedicated loader route → call `getSignInUrl` or `getSignUpUrl` → return `redirect(url, { headers })`.
+
+## Sign-In Route
+
+```ts
+// app/routes/login.ts
+import { redirect, type LoaderFunctionArgs } from 'react-router';
+import { getSignInUrl } from '@workos-inc/authkit-react-router';
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  const url = new URL(request.url);
+
+  // Forward an optional returnTo query param so users land where they intended
+  const { url: authUrl, headers } = await getSignInUrl(
+    url.searchParams.get('returnTo') ?? undefined,
+    request,
+  );
+
+  // headers contains the PKCE Set-Cookie — must be sent on this redirect
+  return redirect(authUrl, { headers });
+}
+```
+
+Passing `request` as the second argument to `getSignInUrl` ensures the PKCE cookie's `Secure` attribute matches the live request protocol. This matters in local development where your app runs on `http://localhost` but `WORKOS_REDIRECT_URI` may be an `https://` URL — without `request`, a `Secure` cookie is written that the browser silently drops, causing the callback to fail with `Auth cookie missing`.
+
+## Sign-Up Route
+
+```ts
+// app/routes/signup.ts
+import { redirect, type LoaderFunctionArgs } from 'react-router';
+import { getSignUpUrl } from '@workos-inc/authkit-react-router';
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  const url = new URL(request.url);
+
+  const { url: authUrl, headers } = await getSignUpUrl(
+    url.searchParams.get('returnTo') ?? undefined,
+    request,
+  );
+
+  return redirect(authUrl, { headers });
+}
+```
+
+## Linking to Login/Signup
+
+Link to the dedicated routes from any page. Use a `<Form method="post">` with an action for sign-out so that the session is terminated server-side.
+
+```tsx
+// app/routes/_index.tsx
+import {
+  type ActionFunctionArgs,
+  type LoaderFunctionArgs,
+  Form,
+  Link,
+  useLoaderData,
+} from 'react-router';
+import { signOut, authkitLoader } from '@workos-inc/authkit-react-router';
+
+export const loader = (args: LoaderFunctionArgs) => authkitLoader(args);
+
+export async function action({ request }: ActionFunctionArgs) {
+  return await signOut(request);
+}
+
+export default function HomePage() {
+  const { user } = useLoaderData<typeof loader>();
+
+  if (!user) {
+    return (
+      <>
+        <Link to="/login">Log in</Link>
+        <br />
+        <Link to="/signup">Sign up</Link>
+      </>
+    );
+  }
+
+  return (
+    <Form method="post">
+      <p>Welcome back, {user.firstName}!</p>
+      <button type="submit">Sign out</button>
+    </Form>
+  );
+}
+```
+
+## Sign-Out
+
+`signOut(request)` terminates the WorkOS session and destroys the local session cookie, then redirects the user. By default, the user is sent to your app's homepage as configured in the WorkOS dashboard under **Redirect** settings.
+
+Pass `returnTo` to redirect the user to a specific URL after sign-out. Allowed values must be configured in the WorkOS dashboard under [Logout redirects](https://workos.com/docs/user-management/sessions/configuring-sessions/logout-redirect).
+
+```ts
+// app/routes/_index.tsx
+import { type ActionFunctionArgs } from 'react-router';
+import { signOut } from '@workos-inc/authkit-react-router';
+
+export async function action({ request }: ActionFunctionArgs) {
+  // Redirect to the homepage (WorkOS dashboard default)
+  return await signOut(request);
+}
+```
+
+```ts
+// With an explicit returnTo URL:
+export async function action({ request }: ActionFunctionArgs) {
+  return await signOut(request, { returnTo: 'https://your-app.com/goodbye' });
+}
+```
+
+Internally, `signOut` calls `terminateSession`, which:
+1. Reads the current session cookie and extracts the `sessionId` claim.
+2. Calls `destroySession` to clear the `wos-session` cookie.
+3. Clears any orphaned PKCE verifier cookies left by abandoned OAuth flows.
+4. Redirects to the WorkOS logout URL (which then redirects to your configured homepage or `returnTo`).
+
+## Initiate Login URI
+
+The sign-in route you created above doubles as the **Initiate Login URI** — the URL WorkOS calls when it needs to start an authentication flow on your app's behalf. The most common case is admin impersonation: when a WorkOS admin impersonates a user from the dashboard, WorkOS redirects to this URI to begin a fresh PKCE-protected flow through your app.
+
+To configure it, open the [WorkOS dashboard](https://dashboard.workos.com), navigate to **Applications → your app → Redirects**, and set the **Initiate login URI** to:
+
+- Development: `http://localhost:5173/login`
+- Production: `https://your-app.com/login`
+
+<Important>
+  A configured Initiate Login URI is required for [impersonation](https://workos.com/docs/user-management/impersonation) to work correctly. Without it, WorkOS-initiated flows (such as impersonating a user from the dashboard) redirect directly to your callback URL without a `state` parameter. Because this library enforces PKCE and CSRF verification on every callback, the request is rejected and you will see a `Missing required auth parameter` error.
+</Important>
+
+## Migrating from 0.4.x
+
+<Warning>
+  In versions before `0.10.0`, `getSignInUrl` and `getSignUpUrl` returned a bare URL string that you could render in a `<Link>` or pass directly to `redirect()`. That pattern is no longer supported.
+
+  ```ts
+  // ❌ 0.4.x — no longer works
+  const signInUrl = await getSignInUrl();
+  return redirect(signInUrl);
+
+  // ✅ 0.10.0+ — required pattern
+  const { url, headers } = await getSignInUrl('/dashboard', request);
+  return redirect(url, { headers });
+  ```
+
+  See the [migration guide](/guides/migrating-from-0-4) for a full list of breaking changes.
+</Warning>

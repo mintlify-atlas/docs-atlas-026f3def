@@ -1,0 +1,100 @@
+---
+title: "Public Client (Keyless) Mode"
+sidebarTitle: "Public Client Mode"
+description: "Run AuthKit React Router without a server-held WorkOS API key using PKCE public client mode — ideal for services that only need sign-in."
+---
+
+If your service only needs to sign users in and should not hold a WorkOS secret key, you can run AuthKit in **public client mode**. When `WORKOS_API_KEY` is absent (or `apiKey` is omitted from `configure()`), AuthKit acts as an OAuth public client. Every authorization flow uses PKCE — the code verifier is generated per-flow and stored only in an HttpOnly cookie on the browser that started it, so the authorization code can only be exchanged by that same browser without needing a client secret. Session refresh sends the refresh token together with your `clientId` and no secret.
+
+## Required Configuration
+
+Public client mode requires only three variables:
+
+```bash
+# .env.local
+WORKOS_CLIENT_ID="client_..."       # retrieved from the WorkOS dashboard
+WORKOS_REDIRECT_URI="http://localhost:5173/callback"  # configured in WorkOS dashboard
+WORKOS_COOKIE_PASSWORD="<your password>"              # min 32 characters
+```
+
+No `WORKOS_API_KEY` is set. That is the only difference from the standard confidential client setup.
+
+## What Works Without an API Key
+
+The following functions and flows work in keyless mode:
+
+- **Sign-in and sign-up URLs** — `getSignInUrl()` and `getSignUpUrl()` generate PKCE-protected authorization URLs normally.
+- **Callback handling** — `authLoader()` exchanges the authorization code using the PKCE verifier; no client secret is required.
+- **`authkitLoader`** — session reading, JWKS-based token verification, and automatic token refresh all work. Refresh requests use `clientId` only.
+- **`withAuth`** — raw session access (without automatic refresh) works as usual.
+- **`refreshSession`** — manually refreshing a session (e.g. for `switchToOrganization`) works in keyless mode.
+- **`switchToOrganization`** — switching the active organization triggers a token refresh using only the `clientId`.
+- **`saveSession`** — manually persisting a session from a custom authentication flow works normally.
+- **`signOut`** — session termination and logout URL generation work without an API key.
+
+## What Requires an API Key
+
+<Warning>
+  The following features are **not available** in public client mode and will throw at runtime if called without `WORKOS_API_KEY` configured.
+
+  - **Feature flags via runtime client** — `getFeatureFlagsRuntimeClient()` throws `Feature flags require a WorkOS API key; ...`. The JWT-claim-based `featureFlags` field in `authkitLoader` still works (it reads from the access token), but the server-side runtime client that stays in sync independently of the session requires an API key.
+  - **WorkOS management APIs** — `getWorkOS()` returns a configured WorkOS SDK instance, but any management call (e.g. `workos.organizations.listOrganizations()`, `workos.userManagement.getUser()`) throws an `ApiKeyRequiredException` from the WorkOS Node SDK because no API key was provided.
+</Warning>
+
+## TypeScript Types
+
+AuthKit's configuration type is a discriminated union:
+
+```typescript
+import type {
+  AuthKitConfig,
+  AuthKitConfidentialConfig,
+  AuthKitPublicConfig,
+} from '@workos-inc/authkit-react-router';
+
+// AuthKitConfidentialConfig — apiKey is required
+const confidential: AuthKitConfidentialConfig = {
+  clientId: 'client_...',
+  redirectUri: 'https://your-app.com/callback',
+  cookiePassword: 'your-32-char-minimum-password',
+  apiKey: 'sk_live_...', // required in this variant
+  apiHttps: true,
+  cookieMaxAge: 34560000,
+  cookieName: 'wos-session',
+};
+
+// AuthKitPublicConfig — apiKey must not be set
+const publicClient: AuthKitPublicConfig = {
+  clientId: 'client_...',
+  redirectUri: 'https://your-app.com/callback',
+  cookiePassword: 'your-32-char-minimum-password',
+  // apiKey is `never` in this variant — omit it entirely
+  apiHttps: true,
+  cookieMaxAge: 34560000,
+  cookieName: 'wos-session',
+};
+
+// The union type:
+// type AuthKitConfig = AuthKitConfidentialConfig | AuthKitPublicConfig;
+```
+
+Because configuration is resolved from the environment at runtime, `getConfig('apiKey')` is typed `string | undefined`. Code that needs to branch on the presence of an API key should check the returned value rather than assuming it is always present.
+
+```typescript
+import { getConfig } from '@workos-inc/authkit-react-router';
+
+const apiKey = getConfig('apiKey'); // string | undefined
+if (apiKey) {
+  // Confidential client — management APIs available
+} else {
+  // Public client — sign-in only
+}
+```
+
+## Important Note on SDK Fallback
+
+<Warning>
+  The WorkOS Node SDK reads `process.env.WORKOS_API_KEY` as a fallback when no key is explicitly configured. If that environment variable is present in your server's process — even if you use a custom value source via `configure((key) => mySource(key))` — a key **is** in play and the SDK will use it.
+
+  To run in true keyless mode, ensure `WORKOS_API_KEY` is absent from your process environment entirely. Simply not passing it to `configure()` is not sufficient if the variable exists in `process.env`.
+</Warning>

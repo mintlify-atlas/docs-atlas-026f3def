@@ -1,0 +1,181 @@
+---
+title: "Protecting Routes with AuthKit React Router"
+sidebarTitle: "Protecting Routes"
+description: "Redirect unauthenticated users to WorkOS AuthKit using the ensureSignedIn option, and access full auth data in both protected and public routes."
+---
+
+`authkitLoader` operates in two modes. In **optional authentication** mode, both authenticated and anonymous users can reach the route — your component decides what to show based on whether `user` is non-null. In **required authentication** mode (`ensureSignedIn: true`), unauthenticated users are automatically redirected to WorkOS AuthKit before the route renders.
+
+## Optional Authentication
+
+Use `authkitLoader` without options to allow both signed-in and anonymous users. The loader always returns an auth object; check `user !== null` in your component to branch the UI.
+
+```tsx
+// app/routes/home.tsx
+import { type LoaderFunctionArgs, useLoaderData } from 'react-router';
+import { authkitLoader } from '@workos-inc/authkit-react-router';
+
+export const loader = (args: LoaderFunctionArgs) => authkitLoader(args);
+
+export default function HomePage() {
+  const { user } = useLoaderData<typeof loader>();
+
+  if (!user) {
+    return <p>You are browsing as a guest.</p>;
+  }
+
+  return <p>Welcome back, {user.firstName}!</p>;
+}
+```
+
+## Required Authentication (`ensureSignedIn`)
+
+Pass `ensureSignedIn: true` to enforce authentication. If the user has no valid session, `authkitLoader` redirects them to the WorkOS AuthKit sign-in page. After they authenticate, WorkOS redirects back to your callback URL and the user is sent to the original path via the `returnPathname` state embedded in the authorization URL.
+
+```tsx
+// app/routes/dashboard.tsx
+import { type LoaderFunctionArgs, useLoaderData } from 'react-router';
+import { authkitLoader } from '@workos-inc/authkit-react-router';
+
+export const loader = (args: LoaderFunctionArgs) =>
+  authkitLoader(args, { ensureSignedIn: true });
+
+export default function Dashboard() {
+  // user is always non-null here — unauthenticated users never reach this code
+  const { user, organizationId, role, permissions } = useLoaderData<typeof loader>();
+
+  return <p>Signed in as {user.email} in org {organizationId}</p>;
+}
+```
+
+<Note>
+  `ensureSignedIn` preserves the user's current path. If an unauthenticated user visits `/dashboard?tab=reports`, they are redirected to AuthKit with `returnPathname=/dashboard?tab=reports` and land back on that exact URL after signing in.
+</Note>
+
+## Available Auth Data
+
+Both modes return the same shape from `authkitLoader`. When the user is authenticated, all fields are populated; when they are anonymous every field is `null`.
+
+| Field | Type (authenticated) | Description |
+|-------|----------------------|-------------|
+| `user` | `User` | The WorkOS user object (id, email, firstName, lastName, …) |
+| `sessionId` | `string` | The WorkOS session ID from the `sid` JWT claim |
+| `organizationId` | `string \| null` | The `org_id` JWT claim; present when the user belongs to an org |
+| `role` | `string \| null` | The user's primary role within the organization |
+| `roles` | `string[] \| null` | All roles assigned to the user |
+| `permissions` | `string[]` | Permissions granted to the user |
+| `entitlements` | `string[]` | Entitlements granted to the user |
+| `featureFlags` | `string[]` | Feature flags from the `feature_flags` JWT claim (or runtime client if configured) |
+| `impersonator` | `Impersonator \| null` | Set when an admin is impersonating; contains `email` and `reason` |
+
+```tsx
+import { type LoaderFunctionArgs, useLoaderData } from 'react-router';
+import { authkitLoader } from '@workos-inc/authkit-react-router';
+
+export const loader = (args: LoaderFunctionArgs) =>
+  authkitLoader(args, { ensureSignedIn: true });
+
+export default function Profile() {
+  const {
+    user,
+    sessionId,
+    organizationId,
+    role,
+    roles,
+    permissions,
+    entitlements,
+    featureFlags,
+    impersonator,
+  } = useLoaderData<typeof loader>();
+
+  return (
+    <div>
+      <p>{user.email}</p>
+      {impersonator && (
+        <p>Impersonated by {impersonator.email} — {impersonator.reason}</p>
+      )}
+      <p>Permissions: {permissions.join(', ')}</p>
+      {featureFlags.includes('new-dashboard') && <NewDashboard />}
+    </div>
+  );
+}
+```
+
+## Using a Custom Loader
+
+Pass a loader function as the second argument to run your own server-side logic alongside the auth check. The function receives `{ auth, getAccessToken, ...loaderArgs }` and its return value is merged with the auth fields before being sent to the component.
+
+### Without `ensureSignedIn` (both authenticated and anonymous)
+
+```tsx
+import { data, type LoaderFunctionArgs } from 'react-router';
+import { authkitLoader } from '@workos-inc/authkit-react-router';
+
+export const loader = (args: LoaderFunctionArgs) =>
+  authkitLoader(args, async ({ auth, getAccessToken }) => {
+    if (!auth.user) {
+      // User is not signed in — getAccessToken() returns null here
+      return data({ items: await fetchPublicItems() });
+    }
+
+    // User is signed in — explicitly call getAccessToken() to use it
+    const accessToken = getAccessToken();
+    const items = await fetch('/api/my-items', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    }).then(r => r.json());
+
+    return data({ items });
+  });
+```
+
+### With `ensureSignedIn` (guaranteed authenticated)
+
+```tsx
+import { data, type LoaderFunctionArgs } from 'react-router';
+import { authkitLoader } from '@workos-inc/authkit-react-router';
+
+export const loader = (args: LoaderFunctionArgs) =>
+  authkitLoader(
+    args,
+    async ({ auth, getAccessToken }) => {
+      // auth.user is always non-null here; getAccessToken() always returns a string
+      const accessToken = getAccessToken();
+
+      const profile = await fetch('/api/profile', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }).then(r => r.json());
+
+      return data({ profile });
+    },
+    { ensureSignedIn: true },
+  );
+```
+
+<Note>
+  Access tokens are **not** included in the data returned to React components by default. Returning `accessToken` from your custom loader would expose it in the browser's network inspector and `window.__remixContext`. Only do this when client-side token access is strictly necessary.
+</Note>
+
+## `withAuth` for Low-Level Access
+
+For advanced use cases — API routes, middleware, or custom authentication flows — `withAuth` provides direct access to the session without automatic token refresh or cookie management.
+
+```tsx
+import { withAuth } from '@workos-inc/authkit-react-router';
+import { redirect, type LoaderFunctionArgs } from 'react-router';
+
+export const loader = async (args: LoaderFunctionArgs) => {
+  const auth = await withAuth(args);
+
+  if (!auth.user) {
+    // withAuth does not redirect automatically — you must do it yourself
+    throw redirect('/login');
+  }
+
+  // accessToken is available directly as a property on the return value
+  const { accessToken, user, sessionId } = auth;
+
+  return { user };
+};
+```
+
+`withAuth` does not refresh expired tokens. It is intended to supplement a parent route that uses `authkitLoader`, which handles the refresh transparently. See the [API reference](/api-reference/with-auth) for full details.

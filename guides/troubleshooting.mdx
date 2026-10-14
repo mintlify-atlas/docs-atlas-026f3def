@@ -1,0 +1,238 @@
+---
+title: "Troubleshooting AuthKit React Router"
+sidebarTitle: "Troubleshooting"
+description: "Fix common AuthKit React Router errors including Missing required auth parameter, Auth cookie missing, and session refresh failures."
+---
+
+## Authentication Errors
+
+<AccordionGroup>
+  <Accordion title="Missing required auth parameter when signing in or during impersonation">
+    This error surfaces when the OAuth callback receives a `state` parameter that doesn't match a PKCE verifier cookie set on the current browser. The library enforces PKCE and CSRF verification on **every** callback, so any flow that reaches the callback URL without first passing through your application's sign-in route will be rejected.
+
+    The most common trigger is **dashboard impersonation**: when an admin initiates impersonation from the WorkOS dashboard, WorkOS redirects straight to your callback URL — bypassing your sign-in route entirely — so no PKCE cookie is ever set.
+
+    **Fix 1 — Configure an Initiate Login URI in the WorkOS dashboard**
+
+    Open the [WorkOS dashboard](https://dashboard.workos.com), go to **Applications**, select your application, navigate to the **Redirects** tab, and set the **Initiate login URI** to the public URL of your `/login` route (e.g., `https://your-app.com/login` in production, `http://localhost:5173/login` in development).
+
+    When this URI is configured, WorkOS-initiated flows (impersonation, password resets on a different device, etc.) will route through your sign-in loader first, allowing the PKCE verifier and CSRF state to be set up before the user is redirected to AuthKit.
+
+    **Fix 2 — Ensure sign-in / sign-up URLs are built in a redirect route**
+
+    Your `/login` loader must generate the authorization URL **and** immediately redirect — not load the URL into page data for a component to render. See [Change 2: Move to dedicated redirect routes](/guides/migrating-from-0-4#change-2-move-to-dedicated-redirect-routes) for the correct pattern.
+  </Accordion>
+
+  <Accordion title="Auth cookie missing — cannot verify OAuth state">
+    The PKCE verifier cookie was not found when the callback tried to verify the OAuth `state`. The full error message is:
+
+    ```
+    Auth cookie missing — cannot verify OAuth state. Ensure Set-Cookie headers are propagated on the redirect that started this flow.
+    ```
+
+    This has two common causes:
+
+    1. **The `Set-Cookie` header was not forwarded to the browser.** `getSignInUrl` / `getSignUpUrl` return `{ url, headers }`, and those `headers` must be passed to `redirect()`. If you call `redirect(url)` without `{ headers }`, the cookie is never sent and the callback will always fail.
+    2. **The cookie was silently dropped because its `Secure` attribute didn't match the page protocol.** If you call `getSignInUrl` without passing `request`, the library falls back to the `WORKOS_REDIRECT_URI` protocol to decide whether to set `Secure`. In local development, the app typically runs on `http://localhost` but `WORKOS_REDIRECT_URI` is often an `https://` URL — so the library mints a `Secure` cookie that the browser drops.
+
+    **Fix 1 — Forward the `headers` on the redirect response**
+
+    ```ts
+    // ❌ Missing headers — cookie is never sent
+    const { url } = await getSignInUrl(undefined, request);
+    return redirect(url);
+
+    // ✅ Headers forwarded — cookie travels to the browser
+    const { url, headers } = await getSignInUrl(undefined, request);
+    return redirect(url, { headers });
+    ```
+
+    **Fix 2 — Pass `request` to `getSignInUrl` / `getSignUpUrl`**
+
+    ```ts
+    // ❌ No request — Secure attribute derived from WORKOS_REDIRECT_URI (wrong in local dev)
+    const { url, headers } = await getSignInUrl('/dashboard');
+
+    // ✅ With request — Secure attribute derived from the live request protocol
+    const { url, headers } = await getSignInUrl('/dashboard', request);
+    ```
+  </Accordion>
+
+  <Accordion title="OAuth state mismatch">
+    This error means the nonce embedded in the URL `state` parameter does not match the nonce sealed inside the PKCE verifier cookie. The callback performs a double-submit binding check — the cookie must carry the same nonce as the URL, proving that the browser presenting the callback is the same browser that started the sign-in flow.
+
+    **Common causes:**
+
+    - **Multiple tabs starting sign-in simultaneously.** Each tab triggers a new call to `getSignInUrl`, which generates a new nonce and sets a distinct `wos-auth-verifier-<hash>` cookie. If a user opens two tabs and completes the flow from the second tab, the first tab's nonce won't match.
+    - **The authorization URL was copied and opened in a different browser or device.** The PKCE verifier cookie is `HttpOnly` and tied to the browser that received it. Pasting the full authorization URL into a different browser means that browser has no matching cookie.
+    - **The callback URL was replayed.** Authorization codes and their associated `state` values are single-use. Replaying a callback URL that has already been consumed will fail both the PKCE check and the code exchange.
+
+    **Fix — Direct users to your `/login` route, not the full authorization URL**
+
+    The authorization URL (with embedded `state`) should never be shared or bookmarked. Always link to your `/login` loader route (e.g., `<Link to="/login">`), which generates a fresh, flow-specific authorization URL and PKCE cookie on each visit.
+  </Accordion>
+</AccordionGroup>
+
+## Session & Token Errors
+
+<AccordionGroup>
+  <Accordion title="Session not found / No session cookie wos-session found">
+    `withAuth` emits this warning when it cannot find the session cookie on the incoming request:
+
+    ```
+    [AuthKit] No session cookie "wos-session" found. Make sure authkitLoader is used in a parent/root route.
+    ```
+
+    The most likely cause is that `authkitLoader` is **not running in a parent or root route** that processes the session cookie before child routes execute. `withAuth` is a lightweight helper that reads the cookie but does not refresh it — it depends on `authkitLoader` having already run earlier in the route hierarchy to write a fresh, valid session cookie onto the response.
+
+    **Fix — Add `authkitLoader` to your root or layout route**
+
+    ```tsx
+    // app/root.tsx (or your top-level layout route)
+    import { type LoaderFunctionArgs } from 'react-router';
+    import { authkitLoader } from '@workos-inc/authkit-react-router';
+
+    export const loader = (args: LoaderFunctionArgs) => authkitLoader(args);
+    ```
+
+    With `authkitLoader` in the root route, every child route's request will have an up-to-date session cookie that `withAuth` can read.
+  </Accordion>
+
+  <Accordion title="Access token expired warning from withAuth">
+    `withAuth` emits this warning when it finds a session cookie but the access token inside it is past its expiry time:
+
+    ```
+    [AuthKit] Access token expired. Ensure authkitLoader is used in a parent/root route to handle automatic token refresh.
+    ```
+
+    **`withAuth` does not refresh tokens.** Token refresh only happens inside `authkitLoader`. If `authkitLoader` is not running in a parent route, expired tokens are never renewed, and `withAuth` will return `{ user: null }` for every request after the token expires.
+
+    **Fix — Ensure a parent route uses `authkitLoader`**
+
+    ```tsx
+    // app/root.tsx — runs on every request before child loaders
+    import { type LoaderFunctionArgs } from 'react-router';
+    import { authkitLoader } from '@workos-inc/authkit-react-router';
+
+    export const loader = (args: LoaderFunctionArgs) => authkitLoader(args);
+    ```
+
+    `authkitLoader` automatically detects an expired access token, exchanges the refresh token for a new access token, and writes the refreshed session back to the cookie — so by the time a child route calls `withAuth`, the token is valid again.
+  </Accordion>
+
+  <Accordion title="Session refresh fails for some users after deployment">
+    If you have upgraded to `0.10.0+` and are running a mixed deployment (some instances on the new version, some on the old version), sign-in attempts started on old instances will fail when handled by new instances, and vice versa. This is expected behaviour: the PKCE format change is intentionally incompatible with the previous shared state/cookie format to close a callback-replay vulnerability.
+
+    Existing **authenticated** sessions are unaffected — only sign-in flows that are actively in progress at the moment of the deployment cutover will fail.
+
+    **Fix — Coordinate a deployment cutover**
+
+    Deploy all instances serving sign-in and callback requests at the same time. For example, use a coordinated swap to the updated instances rather than a gradual rolling deployment. Because the PKCE verifier cookie has a 10-minute TTL, the impact window is narrow — users who had a sign-in in progress will need to restart it, but users who are already authenticated will not be affected.
+  </Accordion>
+</AccordionGroup>
+
+## Configuration Errors
+
+<AccordionGroup>
+  <Accordion title="Missing required configuration value for clientId (WORKOS_CLIENT_ID)">
+    AuthKit requires three environment variables at startup. If any of them is missing, the library throws an error identifying which value is absent.
+
+    **Fix — Set all three required variables**
+
+    ```bash
+    WORKOS_CLIENT_ID="client_..."        # Your WorkOS Client ID
+    WORKOS_REDIRECT_URI="http://localhost:5173/callback"  # Configured in WorkOS dashboard
+    WORKOS_COOKIE_PASSWORD="<password>"  # At least 32 characters; see below
+    ```
+
+    In a Vite / React Router dev server, put these in **`.env.local`** rather than `.env`. Files named `.env.local` are excluded from version control by default (they appear in the generated `.gitignore`), so your secrets won't be accidentally committed. `.env` files are typically committed and should contain only non-secret defaults.
+
+    Retrieve your `WORKOS_CLIENT_ID` from the **API Keys** section of the [WorkOS dashboard](https://dashboard.workos.com). The `WORKOS_REDIRECT_URI` must match one of the redirect URIs configured in your application's **Redirects** settings.
+  </Accordion>
+
+  <Accordion title="cookiePassword must be at least 32 characters long">
+    The `WORKOS_COOKIE_PASSWORD` (or `cookiePassword` programmatic option) is used to encrypt the session cookie with `iron-session`. The minimum length of 32 characters is enforced for security reasons — shorter passwords don't provide adequate entropy for the encryption scheme.
+
+    **Fix — Generate a sufficiently long password**
+
+    ```bash
+    openssl rand -base64 32
+    ```
+
+    Copy the output into your `.env.local` file:
+
+    ```bash
+    WORKOS_COOKIE_PASSWORD="<output from the command above>"
+    ```
+
+    Keep this value secret and consistent across all instances of your application — changing it will invalidate all existing sessions.
+  </Accordion>
+
+  <Accordion title="Feature flags require a WorkOS API key">
+    Calling `getFeatureFlagsRuntimeClient()` throws the following error when `WORKOS_API_KEY` is not set:
+
+    ```
+    Feature flags require a WorkOS API key; set WORKOS_API_KEY or configure({ apiKey }) to use them.
+    ```
+
+    This happens because `getFeatureFlagsRuntimeClient()` uses a server-side WorkOS management API that requires a secret key to authenticate. Without `WORKOS_API_KEY`, AuthKit operates in **public client (keyless) mode**, which supports sign-in flows but not management API calls.
+
+    **Fix — Set `WORKOS_API_KEY` in your environment**
+
+    ```bash
+    WORKOS_API_KEY="sk_test_..."  # Retrieved from WorkOS dashboard → API Keys
+    ```
+
+    Or pass it programmatically:
+
+    ```ts
+    import { configure } from '@workos-inc/authkit-react-router';
+
+    configure({ apiKey: 'sk_test_...' });
+    ```
+
+    If you are intentionally running in keyless mode (e.g., a public-facing app that shouldn't hold a WorkOS secret), accept that feature flags are unavailable and remove any `getFeatureFlagsRuntimeClient()` calls. All sign-in, sign-up, session management, and token refresh functionality continues to work without an API key.
+  </Accordion>
+</AccordionGroup>
+
+## Debugging
+
+### Enable verbose logs with `debug: true`
+
+Pass `debug: true` to `authkitLoader` to enable detailed logging for a specific route. This prints information about session reads, token refresh attempts, PKCE cookie handling, and feature flag evaluation to the server console.
+
+```ts
+import { type LoaderFunctionArgs } from 'react-router';
+import { authkitLoader } from '@workos-inc/authkit-react-router';
+
+// Simple loader
+export const loader = (args: LoaderFunctionArgs) =>
+  authkitLoader(args, { debug: true });
+
+// Loader with a callback function — pass options as the third argument
+export const loader = (args: LoaderFunctionArgs) =>
+  authkitLoader(
+    args,
+    async ({ auth }) => {
+      return { user: auth.user };
+    },
+    { debug: true },
+  );
+```
+
+When `debug: true` is active, any feature flag evaluation fallback from the runtime client to the JWT claim also emits a warning, making it easier to detect transient runtime-client failures in development.
+
+### Inspect the resolved configuration with `getFullConfig`
+
+`getFullConfig` returns the complete resolved configuration object — the merged result of programmatic `configure()` calls, environment variables, and defaults. Use it during debugging to verify that the values AuthKit is actually using match what you expect.
+
+```ts
+import { getFullConfig } from '@workos-inc/authkit-react-router';
+
+// In a server-side loader or script — for debugging only
+console.log(getFullConfig());
+```
+
+<Warning>
+  **Never call `getFullConfig()` in production logging or return its output to the client.** The resolved configuration includes your `cookiePassword` and, if set, your `apiKey`. Logging these values exposes secrets that could be used to decrypt session cookies or make authenticated WorkOS API calls.
+</Warning>

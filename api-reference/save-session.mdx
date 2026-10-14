@@ -1,0 +1,106 @@
+---
+title: "saveSession — Manually Persist a WorkOS Session"
+sidebarTitle: "saveSession"
+description: "saveSession encrypts and stores a WorkOS authentication response as a session cookie — for custom flows like email verification or token exchange."
+---
+
+`saveSession` is intended for advanced use cases where you bypass the standard `authLoader` callback and need to manually create and persist a session. Common scenarios include custom authentication flows such as email verification, magic-link exchange, or any direct `userManagement.authenticateWith*` call that you handle outside of the built-in callback route.
+
+Under the hood, `saveSession` seals the access token, refresh token, user, and impersonator into an encrypted cookie using the configured `cookiePassword` and returns a `Session` object whose `headers` contain the resulting `Set-Cookie` string.
+
+## Import
+
+```ts
+import { saveSession } from '@workos-inc/authkit-react-router';
+```
+
+## Signature
+
+```ts
+saveSession(
+  sessionOrResponse: Session | AuthenticationResponse,
+  request: Request,
+): Promise<Session>
+```
+
+## Parameters
+
+<ParamField body="sessionOrResponse" type="Session | AuthenticationResponse" required>
+  A WorkOS `AuthenticationResponse` (returned by any `userManagement.authenticateWith*` method) or an existing `Session` object. The function reads `accessToken`, `refreshToken`, `user`, and `impersonator` from whichever shape you pass.
+</ParamField>
+
+<ParamField body="request" type="Request" required>
+  The incoming `Request` from the current loader or action. Used to read the existing `Cookie` header so the session storage can correctly set or update the session cookie.
+</ParamField>
+
+## Returns
+
+<ResponseField name="Session" type="object">
+  A `Session` object populated with the data from `sessionOrResponse` plus a `headers` map containing the `Set-Cookie` directive that must be sent to the browser.
+
+  <Expandable title="Session fields">
+    <ResponseField name="accessToken" type="string">
+      The WorkOS access token (a signed JWT).
+    </ResponseField>
+
+    <ResponseField name="refreshToken" type="string">
+      The WorkOS refresh token used to obtain a new access token when the current one expires.
+    </ResponseField>
+
+    <ResponseField name="user" type="User">
+      The authenticated WorkOS `User` object.
+    </ResponseField>
+
+    <ResponseField name="impersonator" type="Impersonator | undefined">
+      Present when an admin is impersonating this user via the WorkOS dashboard. Contains `email` and `reason`.
+    </ResponseField>
+
+    <ResponseField name="headers" type='Record<string, string>'>
+      A map containing `{ "Set-Cookie": "<sealed-session-cookie>" }`. **You must include this header in your response** so the browser stores the session.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Example
+
+### Email verification flow
+
+```ts
+import { redirect } from 'react-router';
+import { getWorkOS, saveSession } from '@workos-inc/authkit-react-router';
+
+// Example: Email verification flow
+async function handleEmailVerification(request: Request) {
+  const { code } = await request.json();
+
+  // Authenticate directly with the WorkOS API
+  const authResponse = await getWorkOS().userManagement.authenticateWithEmailVerification({
+    clientId: process.env.WORKOS_CLIENT_ID,
+    code,
+  });
+
+  // Encrypt and persist the session as a cookie
+  const session = await saveSession(authResponse, request);
+
+  // Redirect to the dashboard, attaching the Set-Cookie header
+  return redirect('/dashboard', {
+    headers: session.headers,
+  });
+}
+```
+
+<Warning>
+  `saveSession` returns a `Session` object whose `headers` property contains the `Set-Cookie` header. **You must attach these headers to your response** — if you return or throw a redirect without them, the browser will not store the session and the user will appear unauthenticated on the next request.
+
+  Always pass `session.headers` to your redirect or response:
+
+  ```ts
+  // ✅ Correct — session cookie is sent to the browser
+  const session = await saveSession(authResponse, request);
+  return redirect('/dashboard', { headers: session.headers });
+
+  // ❌ Incorrect — session cookie is silently dropped
+  await saveSession(authResponse, request);
+  return redirect('/dashboard');
+  ```
+</Warning>

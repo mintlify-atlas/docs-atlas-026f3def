@@ -1,0 +1,176 @@
+---
+title: "authLoader — WorkOS OAuth Callback Handler"
+sidebarTitle: "authLoader"
+description: "authLoader handles the WorkOS OAuth callback route, exchanging the authorization code for tokens and writing the encrypted session cookie."
+---
+
+`authLoader` is the handler for your WorkOS OAuth callback route. When WorkOS redirects the user back to your application after authentication, `authLoader` takes care of the full callback sequence: reading the `code` and `state` query parameters, verifying the PKCE `codeVerifier` stored in the short-lived HttpOnly cookie, checking that the state nonce matches to guard against CSRF attacks, exchanging the authorization code for an access token and refresh token via the WorkOS API, encrypting the session into a cookie, and finally redirecting the user to the configured destination pathname. An optional `onSuccess` callback lets you persist tokens or OAuth provider data before the redirect fires.
+
+## Import
+
+```ts
+import { authLoader } from '@workos-inc/authkit-react-router';
+```
+
+## Signature
+
+```ts
+authLoader(options?: HandleAuthOptions): LoaderFunction
+```
+
+`authLoader` is a factory — call it once at module level and export the result as your route's `loader`.
+
+## Options (`HandleAuthOptions`)
+
+<ParamField path="returnPathname" type="string" default="'/'">
+  The pathname to redirect users to after a successful sign-in. Must be a same-origin path (e.g. `'/dashboard'`). Defaults to `'/'`.
+
+  When the original sign-in URL carried a `returnPathname` state value (set automatically by `authkitLoader`'s `ensureSignedIn` redirect or by passing a `returnPathname` to `getSignInUrl`), that value takes precedence. If the state-carried value fails sanitization, `returnPathname` from these options is used as the fallback.
+</ParamField>
+
+<ParamField path="onSuccess" type="(data: AuthLoaderSuccessData) => void | Promise<void>">
+  Called after a successful code exchange, before the redirect response is sent. Use this to persist OAuth tokens, log authentication events, or trigger post-login setup. Throwing inside `onSuccess` is not recommended — any error is caught and surfaces as a 500 response.
+
+  Receives an `AuthLoaderSuccessData` object:
+
+  <Expandable title="AuthLoaderSuccessData fields">
+    <ParamField path="accessToken" type="string" required>
+      The freshly issued WorkOS access token (JWT).
+    </ParamField>
+
+    <ParamField path="refreshToken" type="string" required>
+      The refresh token. Store securely — this token can be used to obtain new access tokens. It is also encrypted in the session cookie automatically; you only need to handle it here if you want a server-side copy.
+    </ParamField>
+
+    <ParamField path="user" type="User" required>
+      The WorkOS `User` object for the newly authenticated user.
+    </ParamField>
+
+    <ParamField path="impersonator" type="Impersonator | null" required>
+      Set when a WorkOS admin initiated this session via impersonation. Contains `email` and `reason`. `null` in all normal sign-ins.
+    </ParamField>
+
+    <ParamField path="oauthTokens" type="OauthTokens | null" required>
+      The raw OAuth provider tokens (access token, refresh token, ID token, etc.) returned by the upstream identity provider, if the user signed in via a social or enterprise OAuth connection. `null` when not applicable (e.g. password-based or magic-link sign-in).
+    </ParamField>
+
+    <ParamField path="organizationId" type="string | null" required>
+      The organization the user authenticated into, if applicable. `null` when no organization context is present.
+    </ParamField>
+
+    <ParamField path="authenticationMethod" type="string" required>
+      The method used to authenticate, e.g. `"GoogleOAuth"`, `"MagicAuth"`, `"Password"`. Mirrors `AuthenticationResponse['authenticationMethod']` from the WorkOS Node SDK.
+    </ParamField>
+
+    <ParamField path="state" type="string">
+      A custom state string, if one was passed to `getSignInUrl` / `getSignUpUrl` via the `state` option. `undefined` when no custom state was provided.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="storage" type="SessionStorage">
+  A custom React Router `SessionStorage` implementation. When provided, `cookie.name` is also required. Must match the storage configuration used in your root/parent `authkitLoader`.
+</ParamField>
+
+<ParamField path="cookie" type="object">
+  Cookie configuration. Required when `storage` is provided.
+
+  <Expandable title="cookie fields">
+    <ParamField path="cookie.name" type="string">
+      The name of the session cookie. Must match the name used in the custom `storage` instance and in `authkitLoader`.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+## Examples
+
+### Basic setup
+
+Export `authLoader()` as the route's `loader`. No configuration is needed for the default behavior — users are redirected to `/` after signing in.
+
+```ts app/routes/callback.ts
+import { authLoader } from '@workos-inc/authkit-react-router';
+
+export const loader = authLoader();
+```
+
+### Redirect to a specific path after sign-in
+
+Pass `returnPathname` to send users to a specific page instead of `/`. This acts as the fallback when no return path was preserved from the original request.
+
+```ts app/routes/callback.ts
+import { authLoader } from '@workos-inc/authkit-react-router';
+
+export const loader = authLoader({ returnPathname: '/dashboard' });
+```
+
+### Persisting OAuth tokens with `onSuccess`
+
+Use `onSuccess` to store OAuth provider tokens in your database before the redirect fires. This is the only opportunity to access the raw `oauthTokens` and `refreshToken` — they are not exposed to the client.
+
+```ts app/routes/callback.ts
+import { authLoader } from '@workos-inc/authkit-react-router';
+import { db } from '~/lib/db.server';
+
+export const loader = authLoader({
+  returnPathname: '/dashboard',
+  onSuccess: async ({ user, oauthTokens, organizationId }) => {
+    if (oauthTokens) {
+      await db.oauthToken.upsert({
+        where: { userId: user.id },
+        update: {
+          accessToken: oauthTokens.accessToken,
+          refreshToken: oauthTokens.refreshToken,
+          scopes: oauthTokens.scopes,
+        },
+        create: {
+          userId: user.id,
+          accessToken: oauthTokens.accessToken,
+          refreshToken: oauthTokens.refreshToken,
+          scopes: oauthTokens.scopes,
+        },
+      });
+    }
+  },
+});
+```
+
+### Custom session storage
+
+When your application uses a custom session storage backend, pass the same `storage` and `cookie` configuration to both `authLoader` and `authkitLoader` so both routes share the same session.
+
+```ts app/routes/callback.ts
+import { authLoader } from '@workos-inc/authkit-react-router';
+import { getAuthStorage } from '~/lib/session.server';
+
+export const loader = authLoader({
+  ...getAuthStorage(),
+  returnPathname: '/dashboard',
+});
+```
+
+## Route Setup
+
+<Note>
+  The path of this callback route **must exactly match** the value of your `WORKOS_REDIRECT_URI` environment variable and the redirect URI registered in the WorkOS Dashboard.
+
+  For example, if `WORKOS_REDIRECT_URI` is `http://localhost:5173/callback`, create the file at `app/routes/callback.ts` so that React Router maps it to the `/callback` path.
+
+  ```ts app/routes/callback.ts
+  import { authLoader } from '@workos-inc/authkit-react-router';
+
+  export const loader = authLoader();
+  ```
+</Note>
+
+## PKCE Verification
+
+<Info>
+  Before exchanging the authorization code for tokens, `authLoader` performs two security checks:
+
+  1. **PKCE binding** — The `codeVerifier` is stored exclusively in a short-lived HttpOnly cookie set when the sign-in flow began. `authLoader` reads this cookie and passes the verifier to the WorkOS token endpoint. Because the verifier never appears in the URL, a leaked or replayed callback URL cannot complete the code exchange on its own.
+
+  2. **State nonce check** — Both the URL `state` parameter and the PKCE cookie contain a random `nonce`. `authLoader` asserts they match before proceeding. This prevents CSRF attacks where an attacker tricks a victim's browser into completing an authorization code flow started by the attacker.
+
+  If either check fails, `authLoader` returns a `500` response with a generic error message. Both the PKCE cookie and any orphaned verifier cookies from previous flows are cleared on every exit — success or failure — so they do not accumulate in the browser.
+</Info>

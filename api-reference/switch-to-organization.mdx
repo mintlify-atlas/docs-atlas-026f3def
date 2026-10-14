@@ -1,0 +1,133 @@
+---
+title: "switchToOrganization — Switch the Active Organization"
+sidebarTitle: "switchToOrganization"
+description: "switchToOrganization refreshes the user's session for a different organization, updating organizationId, role, and permissions in the new access token."
+---
+
+`switchToOrganization` refreshes the current user's session in the context of a different WorkOS organization. It exchanges the existing session for a new access token scoped to the target organization, updating `organizationId`, `role`, `roles`, `permissions`, `entitlements`, and `featureFlags` in the process. The updated session is written back to the browser via a `Set-Cookie` response header. If the target organization requires SSO or MFA enrollment, the user is automatically redirected to the AuthKit authorization URL to complete the required flow.
+
+## Import
+
+```ts
+import { switchToOrganization } from '@workos-inc/authkit-react-router';
+```
+
+## Signature
+
+```ts
+switchToOrganization(
+  request: Request,
+  organizationId: string,
+  options?: { returnTo?: string },
+): Promise<Response | TypedResponse>
+```
+
+## Parameters
+
+<ParamField path="request" type="Request" required>
+  The incoming Fetch `Request` from your action or loader. Used to read the current session cookie and derive the new session.
+</ParamField>
+
+<ParamField path="organizationId" type="string" required>
+  The WorkOS organization ID to switch to (e.g. `"org_01HQMJV..."`). The current user must be a member of this organization.
+</ParamField>
+
+<ParamField path="options.returnTo" type="string" optional>
+  A same-origin pathname (e.g. `"/dashboard"`) to redirect to after the organization switch. When provided, the function returns a `302` redirect response with the updated session cookie attached. Only same-origin pathnames are accepted — any other value is sanitized to `"/"` to prevent open redirects.
+</ParamField>
+
+## Returns
+
+The return value depends on whether `returnTo` is provided and whether the switch succeeds.
+
+**With `returnTo`** — returns a `302` redirect `Response` to the specified pathname, with an updated `Set-Cookie` header carrying the new session.
+
+**Without `returnTo`** — returns a `data()` response (React Router's typed response) with an updated `Set-Cookie` header:
+
+<ResponseField name="success" type="true">
+  Indicates the organization switch succeeded.
+</ResponseField>
+
+<ResponseField name="auth" type="object">
+  The updated session claims for the new organization context.
+
+  <Expandable title="auth fields">
+    <ResponseField name="user" type="User">
+      The authenticated WorkOS `User` object.
+    </ResponseField>
+    <ResponseField name="sessionId" type="string">
+      The current session ID, derived from the `sid` claim of the access token.
+    </ResponseField>
+    <ResponseField name="organizationId" type="string | null">
+      The ID of the newly active organization.
+    </ResponseField>
+    <ResponseField name="role" type="string | null">
+      The user's role within the newly active organization.
+    </ResponseField>
+    <ResponseField name="roles" type="string[] | null">
+      All roles assigned to the user within the newly active organization.
+    </ResponseField>
+    <ResponseField name="permissions" type="string[]">
+      Permissions granted to the user within the newly active organization.
+    </ResponseField>
+    <ResponseField name="entitlements" type="string[]">
+      Entitlements associated with the user in the newly active organization.
+    </ResponseField>
+    <ResponseField name="featureFlags" type="string[]">
+      Feature flags active for this user and organization, sourced from the access token's `feature_flags` claim.
+    </ResponseField>
+    <ResponseField name="impersonator" type="Impersonator | null">
+      If the session is being impersonated, contains the impersonator's `email` and `reason`. Otherwise `null`.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+**On error** — returns a `data()` response with HTTP status `400`:
+
+<ResponseField name="success" type="false">
+  Indicates the organization switch failed.
+</ResponseField>
+
+<ResponseField name="error" type="string">
+  A human-readable description of what went wrong.
+</ResponseField>
+
+## Usage
+
+Call `switchToOrganization` from a route action. The example below handles both the redirect and the inline-data cases:
+
+```ts
+// app/routes/org-switcher.ts
+import { type ActionFunctionArgs, data } from 'react-router';
+import { switchToOrganization } from '@workos-inc/authkit-react-router';
+
+export async function action({ request }: ActionFunctionArgs) {
+  const formData = await request.formData();
+  const organizationId = formData.get('organizationId') as string;
+
+  // Redirect to /dashboard after switching
+  return await switchToOrganization(request, organizationId, {
+    returnTo: '/dashboard',
+  });
+}
+```
+
+To stay on the current page and update the UI without a full redirect, omit `returnTo` and read the result directly:
+
+```ts
+export async function action({ request }: ActionFunctionArgs) {
+  const formData = await request.formData();
+  const organizationId = formData.get('organizationId') as string;
+
+  // Returns { success: true, auth: AuthorizedData } or { success: false, error: string }
+  return await switchToOrganization(request, organizationId);
+}
+```
+
+<Note>
+  **SSO and MFA enrollment:** If the target organization enforces SSO or requires MFA enrollment, `switchToOrganization` automatically redirects the user to the AuthKit authorization URL to complete the required flow. After the user satisfies the requirement, they are redirected back through the normal callback flow and the switch completes. Your action code does not need to handle this case explicitly — the redirect is thrown internally.
+</Note>
+
+<Note>
+  **Security — open redirect prevention:** The `returnTo` option only accepts same-origin pathnames (e.g. `"/dashboard"`). Absolute URLs, cross-origin values, and protocol-relative URLs are sanitized to `"/"`. This prevents a request-controlled `returnTo` value from being used as an open redirect.
+</Note>

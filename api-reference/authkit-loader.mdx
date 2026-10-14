@@ -1,0 +1,313 @@
+---
+title: "authkitLoader — React Router Authentication Loader"
+sidebarTitle: "authkitLoader"
+description: "authkitLoader wraps React Router loaders to automatically verify sessions, refresh access tokens, and expose auth data including user, roles, and feature flags."
+---
+
+`authkitLoader` is the primary API for building authenticated routes with `@workos-inc/authkit-react-router`. Drop it into any route loader and it handles the full authentication lifecycle for you: reading the encrypted session cookie, verifying the access token's signature and expiry, transparently refreshing it with the refresh token when necessary, writing the updated `Set-Cookie` header back to the browser, and exposing a typed auth object — including `user`, `sessionId`, `organizationId`, `role`, `permissions`, `entitlements`, `featureFlags`, and `impersonator` — to your component via `useLoaderData`. When `ensureSignedIn: true` is set, unauthenticated visitors are automatically redirected to WorkOS AuthKit before the route renders.
+
+## Import
+
+```ts
+import { authkitLoader } from '@workos-inc/authkit-react-router';
+```
+
+## Signatures
+
+`authkitLoader` is overloaded. Choose the variant that matches your route's needs.
+
+<Tabs>
+  <Tab title="Basic (optional auth)">
+    Allows both authenticated and anonymous users. `user` is `null` when no session is present.
+
+    ```ts
+    authkitLoader(
+      loaderArgs: LoaderFunctionArgs,
+      options?: AuthKitLoaderOptions,
+    ): Promise<DataWithResponseInit<AuthorizedData | UnauthorizedData>>
+    ```
+  </Tab>
+
+  <Tab title="Required auth">
+    Redirects unauthenticated visitors to WorkOS AuthKit before the loader runs. The return type narrows to `AuthorizedData` so TypeScript knows `user` is never `null`.
+
+    ```ts
+    authkitLoader(
+      loaderArgs: LoaderFunctionArgs,
+      options: AuthKitLoaderOptions & { ensureSignedIn: true },
+    ): Promise<DataWithResponseInit<AuthorizedData>>
+    ```
+  </Tab>
+
+  <Tab title="Custom loader">
+    Provide your own loader function as the second argument. It receives the standard loader args plus `auth` and `getAccessToken`, and its return value is **merged** with the auth fields before being forwarded to `useLoaderData`.
+
+    ```ts
+    authkitLoader(
+      loaderArgs: LoaderFunctionArgs,
+      loader: (args: LoaderFunctionArgs & {
+        auth: AuthorizedData | UnauthorizedData;
+        getAccessToken: () => string | null;
+      }) => LoaderReturnValue<Data>,
+      options?: AuthKitLoaderOptions,
+    ): Promise<DataWithResponseInit<UnwrapData<Data> & (AuthorizedData | UnauthorizedData)>>
+    ```
+  </Tab>
+
+  <Tab title="Custom loader + required auth">
+    Combines a custom loader with enforced authentication. The custom loader is only called for authenticated users, and `getAccessToken()` always returns a `string`.
+
+    ```ts
+    authkitLoader(
+      loaderArgs: LoaderFunctionArgs,
+      loader: (args: LoaderFunctionArgs & {
+        auth: AuthorizedData;
+        getAccessToken: () => string;
+      }) => LoaderReturnValue<Data>,
+      options: AuthKitLoaderOptions & { ensureSignedIn: true },
+    ): Promise<DataWithResponseInit<UnwrapData<Data> & AuthorizedData>>
+    ```
+  </Tab>
+</Tabs>
+
+## Parameters
+
+<ParamField path="loaderArgs" type="LoaderFunctionArgs" required>
+  The loader arguments object passed by React Router. At minimum contains `request` (the incoming `Request`), `params`, and `context`. Pass it through directly from your route's `loader` export.
+</ParamField>
+
+<ParamField path="loaderOrOptions" type="AuthLoader | AuthKitLoaderOptions">
+  Either an `AuthKitLoaderOptions` configuration object (when no custom loader is needed), or a custom loader function (see the **Custom loader** signature above). When omitted, `authkitLoader` returns only the standard auth fields.
+</ParamField>
+
+<ParamField path="options" type="AuthKitLoaderOptions">
+  Configuration options. Only used when a custom loader function is passed as the second argument; options come third in that case. See [Options](#options-authkitloaderoptions) below.
+</ParamField>
+
+## Options (`AuthKitLoaderOptions`)
+
+<ParamField path="ensureSignedIn" type="boolean" default="false">
+  When `true`, unauthenticated users are redirected to WorkOS AuthKit before the route renders. The current path is preserved and used as the `returnPathname` so users land back where they started after signing in. When `false` (default), both authenticated and anonymous users may reach the route and `user` may be `null`.
+</ParamField>
+
+<ParamField path="debug" type="boolean" default="false">
+  Emit diagnostic `console.log` messages about session validation and token-refresh results. Useful during local development. Disable in production to avoid leaking session metadata to logs.
+</ParamField>
+
+<ParamField path="featureFlags" type="AuthKitFeatureFlagsOptions">
+  Opt in to server-side feature flag evaluation via the WorkOS Feature Flags runtime client instead of reading flags from the JWT `feature_flags` claim. Requires a WorkOS API key; not available in public-client (keyless) mode.
+
+  <Expandable title="AuthKitFeatureFlagsOptions fields">
+    <ParamField path="featureFlags.runtimeClient" type="FeatureFlagsRuntimeClient" required>
+      A shared `FeatureFlagsRuntimeClient` instance (from `getFeatureFlagsRuntimeClient()`). Create this once per server process — it keeps flag configuration in memory and syncs changes in the background.
+    </ParamField>
+
+    <ParamField path="featureFlags.waitUntilReady" type="boolean | { timeoutMs?: number }">
+      When set, `authkitLoader` awaits `runtimeClient.waitUntilReady()` before evaluating flags. Pass `true` to wait indefinitely, or `{ timeoutMs: 5000 }` to time out after a specified duration in milliseconds. If evaluation still fails after waiting, the loader falls back to the JWT claim and calls `onFeatureFlagsError` if provided.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="onFeatureFlagsError" type="(options: FeatureFlagsErrorOptions) => void | Promise<void>">
+  Called when the feature flags runtime client throws during evaluation. Receives `{ error, request, user, organizationId, tokenFeatureFlags }`. Use this to report the fallback to your monitoring system. After the callback runs, `authkitLoader` falls back to the access token's `feature_flags` claim so authentication continues uninterrupted.
+</ParamField>
+
+<ParamField path="onSessionRefreshError" type="(options: RefreshErrorOptions) => void | Response | Promise<void | Response>">
+  Called when an attempt to refresh the access token fails. Receives `{ error, request, sessionData, isTransient }`. The `isTransient` boolean indicates whether the failure is a transient network/rate-limit error (`true`) versus a terminal invalid-grant error (`false`). Return a `Response` (such as `redirect('/maintenance')`) to override the default behavior of redirecting to the sign-in page.
+</ParamField>
+
+<ParamField path="onSessionRefreshSuccess" type="(options: RefreshSuccessOptions) => void | Promise<void>">
+  Called immediately after a successful token refresh (i.e. the access token was expired and was replaced with a new one). Receives `{ accessToken, user, impersonator, organizationId }`. Use this to update any server-side record of the current token, or for audit logging.
+</ParamField>
+
+<ParamField path="storage" type="SessionStorage">
+  A custom React Router `SessionStorage` implementation to use instead of the default encrypted cookie storage. When provided, `cookie.name` is also required. Useful for Redis-backed, database-backed, or in-memory session stores (e.g. for testing).
+</ParamField>
+
+<ParamField path="cookie" type="object">
+  Cookie configuration. Required when `storage` is provided.
+
+  <Expandable title="cookie fields">
+    <ParamField path="cookie.name" type="string">
+      The name of the session cookie. Must match the name configured on the `storage` instance. Defaults to `WORKOS_COOKIE_NAME` or `"wos-session"`.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+## Returns
+
+`authkitLoader` always returns a React Router `DataWithResponseInit` (the return type of the `data()` helper). When accessed via `useLoaderData`, the shape is one of the following depending on whether a session was found.
+
+### `AuthorizedData` — session present
+
+<ResponseField name="user" type="User" required>
+  The WorkOS `User` object for the authenticated user. Contains `id`, `email`, `firstName`, `lastName`, `profilePictureUrl`, `createdAt`, and other standard profile fields.
+</ResponseField>
+
+<ResponseField name="sessionId" type="string" required>
+  The WorkOS session ID extracted from the `sid` JWT claim. Use this to identify or revoke the specific session.
+</ResponseField>
+
+<ResponseField name="organizationId" type="string | null" required>
+  The organization the user is currently acting within, from the `org_id` JWT claim. `null` when the user is not a member of any organization or no org context is active.
+</ResponseField>
+
+<ResponseField name="role" type="string | null" required>
+  The user's primary role within the current organization. `null` when no role is assigned or no organization context is active.
+</ResponseField>
+
+<ResponseField name="roles" type="string[] | null" required>
+  All roles assigned to the user within the current organization. `null` when no roles are assigned or no organization context is active.
+</ResponseField>
+
+<ResponseField name="permissions" type="string[]" required>
+  Permissions granted to the user within the current organization. Empty array when no organization context is active.
+</ResponseField>
+
+<ResponseField name="entitlements" type="string[]" required>
+  Entitlements granted to the user. Empty array when none are configured.
+</ResponseField>
+
+<ResponseField name="featureFlags" type="string[]" required>
+  Active feature flags for this user. By default, read from the `feature_flags` JWT claim. When `featureFlags.runtimeClient` is configured in options, evaluated by the runtime client using the user's `userId` and `organizationId`.
+</ResponseField>
+
+<ResponseField name="impersonator" type="Impersonator | null" required>
+  Set when a WorkOS admin is impersonating this user from the dashboard. Contains `email` (the admin's email address) and `reason` (the impersonation reason, or `null`). `null` in all normal sessions.
+</ResponseField>
+
+### `UnauthorizedData` — no session
+
+When no valid session cookie is found and `ensureSignedIn` is `false`, every field is `null`:
+
+<ResponseField name="user" type="null" required>
+  Always `null` when unauthenticated.
+</ResponseField>
+
+<ResponseField name="sessionId" type="null" required>
+  Always `null` when unauthenticated.
+</ResponseField>
+
+<ResponseField name="organizationId" type="null" required>
+  Always `null` when unauthenticated.
+</ResponseField>
+
+<ResponseField name="role" type="null" required>
+  Always `null` when unauthenticated.
+</ResponseField>
+
+<ResponseField name="roles" type="null" required>
+  Always `null` when unauthenticated.
+</ResponseField>
+
+<ResponseField name="permissions" type="null" required>
+  Always `null` when unauthenticated.
+</ResponseField>
+
+<ResponseField name="entitlements" type="null" required>
+  Always `null` when unauthenticated.
+</ResponseField>
+
+<ResponseField name="featureFlags" type="null" required>
+  Always `null` when unauthenticated.
+</ResponseField>
+
+<ResponseField name="impersonator" type="null" required>
+  Always `null` when unauthenticated.
+</ResponseField>
+
+## Examples
+
+### Basic usage — reading user in a component
+
+Use `authkitLoader` without options to support both authenticated and anonymous visitors. Check `user !== null` to branch your UI.
+
+```tsx app/routes/_index.tsx
+import { type LoaderFunctionArgs, useLoaderData } from 'react-router';
+import { authkitLoader } from '@workos-inc/authkit-react-router';
+
+export const loader = (args: LoaderFunctionArgs) => authkitLoader(args);
+
+export default function HomePage() {
+  const { user } = useLoaderData<typeof loader>();
+
+  if (!user) {
+    return <p>You are browsing as a guest.</p>;
+  }
+
+  return (
+    <p>
+      Welcome back{user.firstName ? `, ${user.firstName}` : ''}! (
+      {user.email})
+    </p>
+  );
+}
+```
+
+### Requiring authentication on a dashboard route
+
+Set `ensureSignedIn: true` to redirect unauthenticated visitors before the route renders. TypeScript narrows `user` to non-null so no null check is needed in your component.
+
+```tsx app/routes/dashboard.tsx
+import { type LoaderFunctionArgs, useLoaderData } from 'react-router';
+import { authkitLoader } from '@workos-inc/authkit-react-router';
+
+export const loader = (args: LoaderFunctionArgs) =>
+  authkitLoader(args, { ensureSignedIn: true });
+
+export default function Dashboard() {
+  const { user, organizationId, role, permissions, featureFlags } =
+    useLoaderData<typeof loader>();
+
+  return (
+    <main>
+      <h1>Welcome back, {user.firstName}!</h1>
+      <p>Org: {organizationId ?? 'No organization'}</p>
+      <p>Role: {role ?? 'None'}</p>
+      {featureFlags.includes('new-dashboard') && <NewDashboardBanner />}
+    </main>
+  );
+}
+```
+
+### Custom loader with a server-side API call
+
+Pass a loader function as the second argument to run your own server-side logic. Use `getAccessToken()` to obtain the raw access token for downstream service calls. Its return value is merged with the auth fields.
+
+```tsx app/routes/projects.tsx
+import { data, type LoaderFunctionArgs, useLoaderData } from 'react-router';
+import { authkitLoader } from '@workos-inc/authkit-react-router';
+
+export const loader = (args: LoaderFunctionArgs) =>
+  authkitLoader(
+    args,
+    async ({ auth, getAccessToken }) => {
+      if (!auth.user) {
+        // User is not signed in — return public data only
+        return data({ projects: [] });
+      }
+
+      // getAccessToken() is safe to call: auth.user is non-null here
+      const accessToken = getAccessToken();
+
+      const response = await fetch('https://api.example.com/projects', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+
+      return data({ projects: await response.json() });
+    },
+  );
+
+export default function ProjectsPage() {
+  // auth fields (user, sessionId, …) are merged in automatically
+  const { user, projects } = useLoaderData<typeof loader>();
+
+  return (
+    <ul>
+      {projects.map((p: { id: string; name: string }) => (
+        <li key={p.id}>{p.name}</li>
+      ))}
+    </ul>
+  );
+}
+```

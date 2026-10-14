@@ -1,0 +1,363 @@
+---
+title: "TypeScript Types for AuthKit React Router"
+sidebarTitle: "Types"
+description: "TypeScript interfaces and types exported by @workos-inc/authkit-react-router including AuthKitConfig, AuthorizedData, UserInfo, and session types."
+---
+
+`@workos-inc/authkit-react-router` exports a set of TypeScript interfaces and types that describe the shape of configuration objects, authentication data, session objects, and loader return values. This page documents each exported type.
+
+---
+
+## `AuthKitConfig`
+
+A discriminated union of `AuthKitConfidentialConfig` and `AuthKitPublicConfig`, resolved at runtime from environment variables and `configure()`.
+
+```ts
+export type AuthKitConfig = AuthKitConfidentialConfig | AuthKitPublicConfig;
+```
+
+The union is discriminated on the presence of `apiKey`: the `AuthKitConfidentialConfig` variant requires it; `AuthKitPublicConfig` explicitly forbids it (`apiKey?: never`). Because configuration is resolved from the environment at runtime, `getConfig('apiKey')` is typed `string | undefined`.
+
+---
+
+## `AuthKitConfidentialConfig`
+
+Extends `AuthKitBaseConfig` and requires an `apiKey`. Use when your server holds a WorkOS API key and you need feature flags or management API access.
+
+```ts
+export interface AuthKitConfidentialConfig extends AuthKitBaseConfig {
+  apiKey: string;
+}
+```
+
+<ResponseField name="apiKey" type="string" required>
+  Your WorkOS API key (`sk_...`). Equivalent to the `WORKOS_API_KEY` environment variable. Required to use `getFeatureFlagsRuntimeClient` and WorkOS management APIs such as `getWorkOS().organizations.*`.
+</ResponseField>
+
+<ResponseField name="clientId" type="string" required>
+  Your WorkOS Client ID. Equivalent to `WORKOS_CLIENT_ID`.
+</ResponseField>
+
+<ResponseField name="redirectUri" type="string" required>
+  The callback URL configured in your WorkOS dashboard. Equivalent to `WORKOS_REDIRECT_URI`.
+</ResponseField>
+
+<ResponseField name="cookiePassword" type="string" required>
+  Password used to encrypt the session cookie. Must be at least 32 characters. Equivalent to `WORKOS_COOKIE_PASSWORD`.
+</ResponseField>
+
+<ResponseField name="cookieName" type="string">
+  Name of the session cookie. Defaults to `"wos-session"`. Equivalent to `WORKOS_COOKIE_NAME`.
+</ResponseField>
+
+<ResponseField name="apiHttps" type="boolean">
+  Whether to use HTTPS for WorkOS API calls. Defaults to `true`. Equivalent to `WORKOS_API_HTTPS`.
+</ResponseField>
+
+<ResponseField name="cookieMaxAge" type="number">
+  Maximum age of the session cookie in seconds. Defaults to `34560000` (400 days). Equivalent to `WORKOS_COOKIE_MAX_AGE`.
+</ResponseField>
+
+<ResponseField name="apiHostname" type="string">
+  WorkOS API hostname. Defaults to `"api.workos.com"`. Equivalent to `WORKOS_API_HOSTNAME`.
+</ResponseField>
+
+<ResponseField name="apiPort" type="number">
+  Port to use for WorkOS API calls. Optional. Equivalent to `WORKOS_API_PORT`.
+</ResponseField>
+
+<ResponseField name="issuer" type="string | string[]">
+  Expected `iss` claim of WorkOS access tokens. Defaults to the configured API origin (e.g. `https://api.workos.com`). Supply multiple values as an array (or a comma-separated string in env vars). Equivalent to `WORKOS_ISSUER`.
+</ResponseField>
+
+---
+
+## `AuthKitPublicConfig`
+
+Extends `AuthKitBaseConfig` and **prohibits** an `apiKey` (`apiKey?: never`). Use when your server should not hold a WorkOS secret and you only need sign-in, session refresh, and sign-out.
+
+```ts
+export interface AuthKitPublicConfig extends AuthKitBaseConfig {
+  apiKey?: never;
+}
+```
+
+All fields are identical to `AuthKitConfidentialConfig` except `apiKey` is explicitly forbidden. Feature flags and WorkOS management APIs are unavailable in this mode.
+
+---
+
+## `AuthorizedData`
+
+The shape returned by `authkitLoader` when a user is signed in. Available via `useLoaderData` in the route component.
+
+```ts
+export interface AuthorizedData {
+  user: User;
+  sessionId: string;
+  organizationId: string | null;
+  role: string | null;
+  roles: string[] | null;
+  permissions: string[];
+  entitlements: string[];
+  featureFlags: string[];
+  impersonator: Impersonator | null;
+}
+```
+
+<ResponseField name="user" type="User" required>
+  The authenticated WorkOS `User` object containing profile information such as `id`, `email`, `firstName`, and `lastName`.
+</ResponseField>
+
+<ResponseField name="sessionId" type="string" required>
+  The WorkOS session ID, sourced from the `sid` claim of the access token.
+</ResponseField>
+
+<ResponseField name="organizationId" type="string | null" required>
+  The organization the user is currently acting within, from the `org_id` access token claim. `null` when the user has no active organization context.
+</ResponseField>
+
+<ResponseField name="role" type="string | null" required>
+  The user's primary role in the current organization, from the `role` access token claim. `null` when no role is set.
+</ResponseField>
+
+<ResponseField name="roles" type="string[] | null" required>
+  All roles assigned to the user in the current organization, from the `roles` access token claim. `null` when not present in the token.
+</ResponseField>
+
+<ResponseField name="permissions" type="string[]" required>
+  Permissions granted to the user, from the `permissions` access token claim. Empty array when none are present.
+</ResponseField>
+
+<ResponseField name="entitlements" type="string[]" required>
+  Entitlements granted to the user, from the `entitlements` access token claim. Empty array when none are present.
+</ResponseField>
+
+<ResponseField name="featureFlags" type="string[]" required>
+  Feature flags enabled for the user. Sourced from the access token's `feature_flags` claim by default, or from the Feature Flags runtime client when `featureFlags.runtimeClient` is passed to `authkitLoader`. Empty array when none are present.
+</ResponseField>
+
+<ResponseField name="impersonator" type="Impersonator | null" required>
+  Non-null when an admin is impersonating this user from the WorkOS dashboard. See [`Impersonator`](#impersonator).
+</ResponseField>
+
+---
+
+## `UnauthorizedData`
+
+The shape returned by `authkitLoader` when no user is signed in and `ensureSignedIn` is `false`. All fields are `null`.
+
+```ts
+export interface UnauthorizedData {
+  user: null;
+  sessionId: null;
+  organizationId: null;
+  role: null;
+  roles: null;
+  permissions: null;
+  entitlements: null;
+  featureFlags: null;
+  impersonator: null;
+}
+```
+
+When `ensureSignedIn: true` is set, `authkitLoader` redirects to WorkOS before the loader can return `UnauthorizedData`, so this shape only appears in routes that allow unauthenticated access.
+
+---
+
+## `UserInfo`
+
+Returned by `withAuth` for an authenticated user. Unlike `AuthorizedData`, `UserInfo` includes `accessToken` as a direct property — useful when you need the raw token for downstream API calls.
+
+```ts
+export interface UserInfo {
+  user: User;
+  sessionId: string;
+  organizationId?: string;
+  role?: string;
+  roles?: string[];
+  permissions?: string[];
+  entitlements?: string[];
+  featureFlags?: string[];
+  impersonator?: Impersonator;
+  accessToken: string;
+}
+```
+
+<ResponseField name="accessToken" type="string" required>
+  The current access token. Included directly in `UserInfo` because `withAuth` is a low-level escape hatch that does not automatically refresh the token or manage cookies. Be mindful of what you return to the client — access tokens in loader data are visible in browser developer tools.
+</ResponseField>
+
+Note that unlike `AuthorizedData`, the optional fields (`organizationId`, `role`, `roles`, etc.) are typed as `T | undefined` rather than `T | null` because they reflect the JWT claims directly without normalization.
+
+---
+
+## `NoUserInfo`
+
+Returned by `withAuth` when the user is unauthenticated. All authentication fields are `undefined`; `user` is `null`.
+
+```ts
+export interface NoUserInfo {
+  user: null;
+  sessionId?: undefined;
+  organizationId?: undefined;
+  role?: undefined;
+  roles?: undefined;
+  permissions?: undefined;
+  entitlements?: undefined;
+  featureFlags?: undefined;
+  impersonator?: undefined;
+  accessToken?: undefined;
+}
+```
+
+`withAuth` does not automatically redirect unauthenticated users. Check `auth.user` before accessing other fields and throw a redirect yourself when the user must be signed in.
+
+---
+
+## `Impersonator`
+
+Describes the admin who is impersonating the current user via the WorkOS dashboard.
+
+```ts
+export interface Impersonator {
+  email: string;
+  reason: string | null;
+}
+```
+
+<ResponseField name="email" type="string" required>
+  The email address of the admin performing the impersonation.
+</ResponseField>
+
+<ResponseField name="reason" type="string | null" required>
+  The reason provided by the admin when starting the impersonation session, or `null` if no reason was given.
+</ResponseField>
+
+---
+
+## `HandleAuthOptions`
+
+Options accepted by `authLoader()` — the loader factory for the OAuth callback route.
+
+```ts
+export type HandleAuthOptions = {
+  returnPathname?: string;
+  onSuccess?: (data: AuthLoaderSuccessData) => void | Promise<void>;
+} & (
+  | {
+      storage?: never;
+      cookie?: SessionIdStorageStrategy['cookie'];
+    }
+  | {
+      storage: SessionStorage;
+      cookie: SessionIdStorageStrategy['cookie'];
+    }
+);
+```
+
+<ResponseField name="returnPathname" type="string">
+  The path to redirect users to after a successful sign-in. Defaults to `/`.
+</ResponseField>
+
+<ResponseField name="onSuccess" type="(data: AuthLoaderSuccessData) => void | Promise<void>">
+  An async callback invoked after a successful authentication. Receives the full `AuthLoaderSuccessData` — including `accessToken`, `refreshToken`, `user`, `oauthTokens`, `impersonator`, `organizationId`, `authenticationMethod`, and `state` — so you can persist tokens or trigger side effects.
+</ResponseField>
+
+<ResponseField name="storage" type="SessionStorage">
+  A custom React Router `SessionStorage` implementation. When provided, `cookie` must also be set. Useful for Redis-backed or database-backed sessions, or for testing with `createMemorySessionStorage`.
+</ResponseField>
+
+<ResponseField name="cookie" type="SessionIdStorageStrategy['cookie']">
+  Cookie configuration for the session. Required when `storage` is provided.
+</ResponseField>
+
+---
+
+## `AuthKitLoaderOptions`
+
+Options accepted by `authkitLoader()`.
+
+```ts
+export type AuthKitLoaderOptions = {
+  ensureSignedIn?: boolean;
+  debug?: boolean;
+  featureFlags?: AuthKitFeatureFlagsOptions;
+  onFeatureFlagsError?: (options: FeatureFlagsErrorOptions) => void | Promise<void>;
+  onSessionRefreshError?: (options: RefreshErrorOptions) => void | Response | Promise<void | Response>;
+  onSessionRefreshSuccess?: (options: RefreshSuccessOptions) => void | Promise<void>;
+} & (
+  | {
+      storage?: never;
+      cookie?: SessionIdStorageStrategy['cookie'];
+    }
+  | {
+      storage: SessionStorage;
+      cookie: SessionIdStorageStrategy['cookie'];
+    }
+);
+```
+
+<ResponseField name="ensureSignedIn" type="boolean">
+  When `true`, unauthenticated requests are automatically redirected to the WorkOS authorization URL. Defaults to `false`.
+</ResponseField>
+
+<ResponseField name="debug" type="boolean">
+  When `true`, emits diagnostic log messages for session validation, refresh attempts, and feature flag fallbacks. Defaults to `false`.
+</ResponseField>
+
+<ResponseField name="featureFlags" type="AuthKitFeatureFlagsOptions">
+  Opts in to runtime feature flag evaluation via the WorkOS Feature Flags client. See [`getFeatureFlagsRuntimeClient`](/api-reference/get-feature-flags-runtime-client).
+
+  ```ts
+  interface AuthKitFeatureFlagsOptions {
+    runtimeClient: FeatureFlagsRuntimeClient;
+    waitUntilReady?: boolean | { timeoutMs?: number };
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="onFeatureFlagsError" type="(options: FeatureFlagsErrorOptions) => void | Promise<void>">
+  Called when the Feature Flags runtime client fails to evaluate flags. `authkitLoader` automatically falls back to the access token's `feature_flags` claim. Use this callback to report the failure to your monitoring system.
+</ResponseField>
+
+<ResponseField name="onSessionRefreshError" type="(options: RefreshErrorOptions) => void | Response | Promise<void | Response>">
+  Called when an automatic session refresh fails. Receives an `error`, the `request`, the raw `sessionData`, and an `isTransient` boolean that indicates whether the failure was due to a network error or rate limit (transient) vs an expired refresh token (terminal). Return a `Response` to override the default redirect behaviour.
+</ResponseField>
+
+<ResponseField name="onSessionRefreshSuccess" type="(options: RefreshSuccessOptions) => void | Promise<void>">
+  Called after a successful automatic session refresh. Receives the new `accessToken`, `user`, `impersonator`, and `organizationId`.
+</ResponseField>
+
+<ResponseField name="storage" type="SessionStorage">
+  A custom React Router `SessionStorage` implementation. When provided, `cookie` must also be set.
+</ResponseField>
+
+<ResponseField name="cookie" type="SessionIdStorageStrategy['cookie']">
+  Cookie configuration for the session. Required when `storage` is provided.
+</ResponseField>
+
+---
+
+## `GetAuthURLResult`
+
+The return type of `getSignInUrl` and `getSignUpUrl`. Contains both the authorization URL and a `Set-Cookie` header that must travel to the browser on the same redirect response.
+
+```ts
+export interface GetAuthURLResult {
+  url: string;
+  headers: { 'Set-Cookie': string };
+}
+```
+
+<ResponseField name="url" type="string" required>
+  The full WorkOS authorization URL to redirect the user to.
+</ResponseField>
+
+<ResponseField name="headers" type='{ "Set-Cookie": string }' required>
+  A short-lived `Set-Cookie` header containing the PKCE code verifier and CSRF nonce. **Must** be attached to the redirect response that sends the user to WorkOS so the callback route can verify the response came from this browser.
+
+  ```ts
+  const { url, headers } = await getSignInUrl('/dashboard', request);
+  return redirect(url, { headers });
+  ```
+</ResponseField>

@@ -1,0 +1,174 @@
+---
+title: "Session Management in AuthKit React Router"
+sidebarTitle: "Session Management"
+description: "Learn how AuthKit React Router stores sessions in encrypted cookies, automatically refreshes access tokens, and handles transient refresh failures."
+---
+
+AuthKit React Router manages authentication state across requests through a server-side session lifecycle. On every request, `authkitLoader` verifies the current access token and silently refreshes it when it has expired — the user's session continues without interruption, and the updated cookie is written back to the browser automatically.
+
+## How Sessions Work
+
+Sessions are stored as sealed, encrypted payloads in an **HttpOnly cookie** named `wos-session` by default. The cookie contents are encrypted using [iron-session](https://github.com/vvo/iron-session) with the `cookiePassword` you configure, so the raw token values are never readable by JavaScript in the browser.
+
+Each sealed session contains these fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `accessToken` | `string` | A signed JWT issued by WorkOS |
+| `refreshToken` | `string` | Used to obtain new access tokens when the current one expires |
+| `user` | `User` | The authenticated WorkOS user object |
+| `impersonator` | `Impersonator \| undefined` | Present when an admin is impersonating another user |
+
+The cookie itself is stored inside a React Router `SessionStorage` entry under the key `jwt`. The encrypted payload is committed via `commitSession` and flows to the browser in a `Set-Cookie` response header.
+
+## Automatic Token Refresh
+
+`authkitLoader` calls `updateSession` on every incoming request. The function:
+
+1. Reads the sealed session from the `Cookie` header.
+2. Calls `verifyAccessToken`, which validates the JWT signature against the WorkOS JWKS endpoint (`getJwksUrl`) and checks the `iss` claim against your configured API origin.
+3. If verification **passes**, the existing session is returned unchanged.
+4. If verification **fails** (the access token has expired), `authenticateWithRefreshToken` is called with the stored `refreshToken` and the current `organizationId` claim.
+5. On success, `encryptSession` seals the new `accessToken` and `refreshToken`, `commitSession` serializes the cookie, and the resulting `Set-Cookie` header is appended to the response so the browser receives the updated session transparently.
+
+```typescript
+// authkitLoader calls updateSession internally — no manual work required
+import { type LoaderFunctionArgs } from 'react-router';
+import { authkitLoader } from '@workos-inc/authkit-react-router';
+
+export const loader = (args: LoaderFunctionArgs) => authkitLoader(args);
+```
+
+<Note>
+  Access tokens are verified against the WorkOS JWKS URL derived from your `clientId`. The JWKS result is cached in memory so subsequent requests do not incur additional round-trips for the key set.
+</Note>
+
+## Transient vs Terminal Failures
+
+When `authenticateWithRefreshToken` throws, `authkitLoader` wraps the error in a `SessionRefreshError`. The error carries an `isTransient` flag that distinguishes between recoverable and unrecoverable failures.
+
+### Transient failures
+
+The following HTTP status codes are considered transient — the refresh token is still valid and the failure is likely a temporary infrastructure problem:
+
+| Status | Meaning |
+|--------|---------|
+| `408` | Request timeout (normalized by the WorkOS SDK) |
+| `429` | Rate limited |
+| `500` | Internal server error |
+| `502` | Bad gateway |
+| `503` | Service unavailable |
+| `504` | Gateway timeout |
+
+Network-level errors (`TypeError` with messages matching `fetch failed`, `Failed to fetch`, `network`, `load failed`, or `terminated`) are also treated as transient.
+
+On a transient failure, `authkitLoader` **preserves** the sealed session cookie. The browser still holds a valid refresh token, so the next request can retry the refresh once the transient condition clears.
+
+### Terminal failures
+
+Any other error — most commonly a `400 invalid_grant` response indicating the refresh token has been revoked or has expired — is treated as terminal. On a terminal failure, the session cookie is **destroyed** and the user is redirected to WorkOS AuthKit to sign in again.
+
+```typescript
+import { SessionRefreshError, isTransientRefreshError } from '@workos-inc/authkit-react-router';
+
+// isTransientRefreshError is also exported if you need to classify errors
+// outside of authkitLoader:
+try {
+  // ...some refresh call
+} catch (error) {
+  const transient = isTransientRefreshError(error);
+  // transient === true  → preserve session, retry later
+  // transient === false → destroy session, force re-auth
+}
+```
+
+## Session Refresh Callbacks
+
+`authkitLoader` exposes two optional callbacks so you can hook into the refresh lifecycle — for example to sync updated tokens to a database, emit telemetry, or implement custom retry logic.
+
+### `onSessionRefreshSuccess`
+
+Called after a successful token refresh with the new token data. Useful for persisting the updated access token to your own storage.
+
+```typescript
+import { type LoaderFunctionArgs } from 'react-router';
+import { authkitLoader } from '@workos-inc/authkit-react-router';
+
+export const loader = (args: LoaderFunctionArgs) =>
+  authkitLoader(args, {
+    onSessionRefreshSuccess: async ({ accessToken, user, impersonator, organizationId }) => {
+      // Called only when the access token was actually refreshed this request
+      await myDb.updateToken(user.id, accessToken);
+    },
+  });
+```
+
+### `onSessionRefreshError`
+
+Called when a refresh attempt throws, before `authkitLoader` decides what to do next. You can return a `Response` to override the default redirect behaviour, or `void` to let `authkitLoader` handle it.
+
+```typescript
+import { type LoaderFunctionArgs } from 'react-router';
+import { authkitLoader } from '@workos-inc/authkit-react-router';
+
+export const loader = (args: LoaderFunctionArgs) =>
+  authkitLoader(args, {
+    onSessionRefreshError: async ({ error, request, isTransient, sessionData }) => {
+      // Log to your monitoring system
+      myMonitoring.captureException(error, { tags: { transient: isTransient } });
+
+      // Return a custom Response to override the default redirect,
+      // or return void to use the built-in behaviour.
+    },
+  });
+```
+
+<Tip>
+  `onSessionRefreshError` receives the raw underlying error as `error` (the `cause` of the `SessionRefreshError`). Use `isTransient` to decide whether to alert on the failure or treat it as expected noise.
+</Tip>
+
+## Cookie Defaults
+
+When no custom `SessionStorage` is provided, AuthKit creates a `CookieSessionStorage` with these defaults:
+
+| Setting | Default | Notes |
+|---------|---------|-------|
+| `name` | `wos-session` | Overridable via `WORKOS_COOKIE_NAME` or `cookieName` in `configure()` |
+| `path` | `/` | Applied to all routes |
+| `httpOnly` | `true` | Not accessible via JavaScript |
+| `secure` | `true` when redirect URI uses HTTPS | Set to `false` automatically in local dev if your redirect URI is `http://` |
+| `sameSite` | `lax` | Protects against most CSRF attacks while allowing top-level navigation |
+| `maxAge` | `34560000` (400 days) | The maximum allowed by Chrome; overridable via `WORKOS_COOKIE_MAX_AGE` |
+| `secrets` | `[cookiePassword]` | Your configured `WORKOS_COOKIE_PASSWORD` |
+
+<Note>
+  The long `maxAge` is intentional. The session is actually bounded by the access token and refresh token lifetimes managed by WorkOS — the cookie simply needs to outlive both. You can shorten it with `WORKOS_COOKIE_MAX_AGE` if your security policy requires it.
+</Note>
+
+## Custom Cookie Name
+
+You can change the default cookie name (`wos-session`) in two ways:
+
+**Via environment variable:**
+
+```bash
+# .env.local
+WORKOS_COOKIE_NAME="my-app-session"
+```
+
+**Via `configure()`:**
+
+```typescript
+import { configure } from '@workos-inc/authkit-react-router';
+
+configure({
+  clientId: 'client_...',
+  redirectUri: 'https://your-app.com/callback',
+  cookiePassword: 'your-32-char-minimum-password',
+  cookieName: 'my-app-session',
+});
+```
+
+<Note>
+  When using a custom cookie name, pass the same `cookie: { name: 'my-app-session' }` option to both `authkitLoader` and `authLoader` (the callback route loader) so they read from the same cookie.
+</Note>

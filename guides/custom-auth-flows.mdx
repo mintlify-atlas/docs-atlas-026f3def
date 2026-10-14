@@ -1,0 +1,112 @@
+---
+title: "Custom Authentication Flows with AuthKit React Router"
+sidebarTitle: "Custom Auth Flows"
+description: "Manually create and store WorkOS sessions for custom flows like email verification or token exchange using saveSession and getWorkOS."
+---
+
+The standard `authkitLoader` + `authLoader` pair handles the complete OAuth callback flow automatically. Some use cases require stepping outside that flow: email verification codes, magic links, direct token exchange from a mobile handoff, or any scenario where your server calls a WorkOS authentication endpoint directly and receives an `AuthenticationResponse`. For these cases, `saveSession` lets you persist the resulting session into the AuthKit cookie, and `getWorkOS()` provides direct access to the underlying WorkOS SDK client.
+
+## `saveSession` Example
+
+Use `saveSession` when you have an `AuthenticationResponse` from the WorkOS SDK and want to store it as an AuthKit session. After saving, redirect the user to the appropriate page — the session is now readable by `authkitLoader` on subsequent requests.
+
+```ts
+import { redirect } from 'react-router';
+import { getWorkOS, saveSession } from '@workos-inc/authkit-react-router';
+
+// Example: Email verification flow
+async function handleEmailVerification(request: Request) {
+  const { code } = await request.json();
+
+  // Call the WorkOS API directly to authenticate with the verification code
+  const authResponse = await getWorkOS().userManagement.authenticateWithEmailVerification({
+    clientId: process.env.WORKOS_CLIENT_ID,
+    code,
+  });
+
+  // Persist the session to the AuthKit cookie
+  await saveSession(
+    {
+      accessToken: authResponse.accessToken,
+      refreshToken: authResponse.refreshToken,
+      user: authResponse.user,
+      impersonator: authResponse.impersonator,
+    },
+    request,
+  );
+
+  return redirect('/dashboard');
+}
+```
+
+`saveSession` accepts either a `Session` object (with `accessToken`, `refreshToken`, `user`, and optionally `impersonator`) or a full `AuthenticationResponse` from the WorkOS SDK — both shapes are compatible. It writes the encrypted session to the AuthKit cookie and returns the `Session` with a `Set-Cookie` header attached.
+
+## Direct WorkOS Client Access
+
+`getWorkOS()` returns the shared, lazily-initialized WorkOS SDK instance configured with your API key and client ID. You can call any method on the WorkOS SDK through this instance:
+
+```ts
+import { getWorkOS } from '@workos-inc/authkit-react-router';
+
+// Get the configured WorkOS client
+const workos = getWorkOS();
+
+// Example: list organizations
+const { data: organizations } = await workos.organizations.listOrganizations({
+  limit: 10,
+});
+```
+
+<Warning>
+  WorkOS management APIs — including `organizations.*`, `userManagement.getUser`, and all other
+  server-side SDK methods — require a WorkOS API key (`WORKOS_API_KEY` or `configure({ apiKey })`).
+  In public-client (keyless) mode these calls throw an `ApiKeyRequiredException`. Feature flags
+  also require an API key. See the [configuration docs](/configuration) for details on keyless mode.
+</Warning>
+
+## When to Use `withAuth`
+
+`withAuth` is designed for API routes, middleware, or any context where you need to inspect the current session without triggering the full `authkitLoader` machinery (token refresh, cookie management, session updates). It reads the session from the cookie and returns the auth data synchronously — no side effects.
+
+```tsx
+import { withAuth } from '@workos-inc/authkit-react-router';
+import { redirect, type LoaderFunctionArgs } from 'react-router';
+
+export const loader = async (args: LoaderFunctionArgs) => {
+  const auth = await withAuth(args);
+
+  if (!auth.user) {
+    // withAuth does not redirect automatically — handle it manually
+    throw redirect('/sign-in');
+  }
+
+  // The access token is directly available as a property
+  const { accessToken, user, sessionId } = auth;
+
+  const apiData = await fetch('https://api.example.com/data', {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  return {
+    user,
+    apiData: await apiData.json(),
+    // accessToken, // ⚠️ Only include if client-side access is required
+  };
+};
+```
+
+<Warning>
+  `withAuth` does **not** perform token refresh. If the access token in the cookie is expired,
+  `withAuth` returns `{ user: null }` and logs a warning. To ensure tokens are refreshed
+  automatically, run `authkitLoader` in a parent or root route so that it processes each request
+  before child route loaders run.
+</Warning>
+
+## `authkitLoader` vs `withAuth`
+
+| Feature | `authkitLoader` | `withAuth` |
+|---|---|---|
+| Auto token refresh | Yes | No |
+| Cookie management | Yes | No |
+| Redirect on unauthenticated | Optional (`ensureSignedIn`) | Manual |
+| Access token returned | Via `getAccessToken()` | Direct property |

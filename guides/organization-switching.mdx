@@ -1,0 +1,106 @@
+---
+title: "Switch Organizations with AuthKit React Router"
+sidebarTitle: "Organization Switching"
+description: "Allow users to switch between organizations by refreshing their session with a new organizationId using the switchToOrganization function."
+---
+
+`switchToOrganization` allows a user to move between organizations they belong to without signing out and back in. It refreshes the current session against the WorkOS API using a target `organizationId`, which updates the `org_id`, `role`, `permissions`, `entitlements`, and other claims in the new access token. The updated session is written back to the cookie as part of the response.
+
+## Basic Usage
+
+Call `switchToOrganization(request, organizationId)` from a React Router action or loader. It returns the updated auth data on success:
+
+```tsx
+import { switchToOrganization } from '@workos-inc/authkit-react-router';
+import { type ActionFunctionArgs } from 'react-router';
+
+export async function action({ request }: ActionFunctionArgs) {
+  const formData = await request.formData();
+  const organizationId = formData.get('organizationId') as string;
+
+  const result = await switchToOrganization(request, organizationId);
+
+  return result;
+}
+```
+
+On a successful switch, the response includes a `Set-Cookie` header with the refreshed session and returns the updated auth claims:
+
+```json
+{
+  "success": true,
+  "auth": {
+    "user": { ... },
+    "sessionId": "session_...",
+    "organizationId": "org_...",
+    "role": "member",
+    "roles": ["member"],
+    "permissions": ["posts:read"],
+    "entitlements": ["analytics"],
+    "featureFlags": ["advanced-analytics"],
+    "impersonator": null
+  }
+}
+```
+
+## With `returnTo` Redirect
+
+Pass a `returnTo` option to redirect the user to a specific path after switching organizations:
+
+```tsx
+export async function action({ request }: ActionFunctionArgs) {
+  const formData = await request.formData();
+  const organizationId = formData.get('organizationId') as string;
+
+  return switchToOrganization(request, organizationId, {
+    returnTo: '/dashboard',
+  });
+}
+```
+
+When `returnTo` is provided, `switchToOrganization` returns a `redirect()` response to the specified path (with the refreshed session cookie attached) instead of returning the auth data object.
+
+`returnTo` must be a **same-origin pathname** such as `/dashboard` or `/settings/profile`. Any value that is not a relative pathname (e.g. an absolute URL pointing to a different origin) is sanitized to `/` to prevent open redirect vulnerabilities.
+
+## SSO and MFA Handling
+
+If the target organization requires SSO or MFA enrollment that the current session does not satisfy, `switchToOrganization` automatically redirects the user to the WorkOS AuthKit authorization URL to complete the additional step. Your action does not need to handle this case explicitly — the redirect is thrown as a `302` response and propagated by React Router.
+
+After the user completes the required authentication step, they are sent back through your callback route and their session is updated with the new organization context.
+
+## Response Shape
+
+**On success** (when `returnTo` is not provided):
+
+```typescript
+{
+  success: true,
+  auth: {
+    user: User;
+    sessionId: string;
+    organizationId: string | null;
+    role: string | null;
+    roles: string[] | null;
+    permissions: string[];
+    entitlements: string[];
+    featureFlags: string[];
+    impersonator: Impersonator | null;
+  }
+}
+```
+
+**On failure** (e.g. the user is not a member of the target organization):
+
+```typescript
+{
+  success: false,
+  error: string; // Human-readable error message
+}
+// HTTP status 400
+```
+
+Note that SSO/MFA-required cases are not returned as failures — they result in a redirect (see above).
+
+## `refreshSession`
+
+`switchToOrganization` is built on top of the lower-level `refreshSession` function, which exchanges the current refresh token for a new access token (optionally targeting a different organization). If you need finer-grained control — for example, refreshing the session without switching organizations, or handling the raw session data directly — see the [refreshSession API reference](/api-reference/refresh-session).

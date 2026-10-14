@@ -1,0 +1,111 @@
+---
+title: "Migrate from AuthKit React Router 0.4.x to 0.10+"
+sidebarTitle: "Migration Guide"
+description: "Step-by-step guide to upgrading from @workos-inc/authkit-react-router 0.4.x to 0.10.0+, which adds PKCE and CSRF protection to the authorization-code flow."
+---
+
+Version `0.10.0` is a breaking release that adds **PKCE and CSRF protection** to the OAuth authorization-code flow. Every sign-in and sign-up redirect now sets a short-lived, flow-specific `wos-auth-verifier-<hash>` cookie containing a sealed OAuth `state` value. The callback verifies the round-tripped `state` matches that cookie before exchanging the authorization code, ensuring the response came from the browser that started the flow.
+
+Upgrading from `0.4.x` requires small changes to any route that builds a sign-in or sign-up URL. The sections below walk through each change.
+
+## Breaking Changes Overview
+
+<Warning>
+  **`0.10.0` introduces three breaking changes:**
+
+  1. **`getSignInUrl` / `getSignUpUrl` return `{ url, headers }` instead of a bare string.** The `headers` object contains a `Set-Cookie` that must be forwarded to the browser on the same redirect response that sends the user to AuthKit.
+  2. **Sign-in / sign-up URLs must be built inside a dedicated redirect loader, not loaded into page data.** The cookie and the URL must leave the server on the same response; rendering the URL in a `<Link>` no longer works.
+  3. **`@workos-inc/node ^8.9.0` is now the minimum required peer dependency.** PKCE support lives in the `pkce` namespace introduced in that version.
+</Warning>
+
+## Change 1: Update `getSignInUrl` / `getSignUpUrl` calls
+
+`getSignInUrl` and `getSignUpUrl` previously returned a bare URL string. They now return a `{ url, headers }` object. The `headers` carry a `Set-Cookie` for the PKCE verifier that **must** travel to the browser on the same redirect that sends the user to AuthKit — if it doesn't, the callback will fail with `Auth cookie missing`.
+
+```ts
+// Before (0.4.x)
+const signInUrl = await getSignInUrl();
+return redirect(signInUrl);
+
+// After (0.10.0+)
+const { url, headers } = await getSignInUrl('/dashboard', request);
+return redirect(url, { headers });
+```
+
+The same change applies to `getSignUpUrl` and the lower-level `getAuthorizationUrl`.
+
+## Change 2: Move to dedicated redirect routes
+
+The old pattern of loading the sign-in URL into page data and rendering it directly in a `<Link>` no longer works. Because the PKCE cookie and the authorization URL must be sent on the **same response**, the URL must be generated inside a loader that immediately issues a redirect — not one that returns data for a component to render.
+
+Create a dedicated `app/routes/login.ts` loader:
+
+```ts
+// app/routes/login.ts
+import { redirect, type LoaderFunctionArgs } from 'react-router';
+import { getSignInUrl } from '@workos-inc/authkit-react-router';
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  const url = new URL(request.url);
+  const { url: authUrl, headers } = await getSignInUrl(
+    url.searchParams.get('returnTo') ?? undefined,
+    request,
+  );
+  return redirect(authUrl, { headers });
+}
+```
+
+Then link to that route from any page where you want to offer sign-in:
+
+```tsx
+// app/routes/_index.tsx
+import { Link } from 'react-router';
+
+// Instead of:
+// <Link to={signInUrl}>Log in</Link>
+
+// Use:
+<Link to="/login">Log in</Link>
+```
+
+Do the same for sign-up (`app/routes/signup.ts` using `getSignUpUrl`). See the [Sign-in and sign-up routes](/guides/sign-in-sign-out) guide for the complete pattern.
+
+## Change 3: Pass `request` to URL builders
+
+`getSignInUrl`, `getSignUpUrl`, and `getAuthorizationUrl` now accept the incoming `Request` as their second argument. Always pass it when calling from a loader.
+
+The reason: the PKCE verifier cookie is set in the same `Set-Cookie` header as the redirect. Whether the cookie carries the `Secure` attribute is resolved from the **live request protocol**, not the configured `WORKOS_REDIRECT_URI`. In local development, your app runs on `http://localhost` but your redirect URI is typically an `https://` URL. Without `request`, the library falls back to the redirect URI's protocol and mints a `Secure` cookie that the browser silently drops — causing every callback to fail with `Auth cookie missing`.
+
+```ts
+// Without request — uses WORKOS_REDIRECT_URI protocol (wrong in local dev)
+const { url, headers } = await getSignInUrl('/dashboard');
+
+// With request — uses the live protocol of this specific HTTP request (correct)
+const { url, headers } = await getSignInUrl('/dashboard', request);
+```
+
+## Change 4: Upgrade `@workos-inc/node`
+
+PKCE support is implemented in the `pkce` namespace of `@workos-inc/node`, which requires version `^8.9.0`. If your application pins an older version, upgrade it:
+
+```bash
+npm install @workos-inc/node@^8.9.0
+```
+
+## Existing Sessions
+
+<Note>
+  Existing authenticated sessions are **unaffected** by the PKCE format change. The new PKCE verification only applies to sign-in attempts — sessions that were already established before the upgrade continue to work without any action from you or your users.
+
+  Only sign-in flows that were **in progress at the exact moment of deployment** (i.e., the user had already been redirected to AuthKit but had not yet completed the callback) will fail. Those users will need to restart their sign-in.
+</Note>
+
+## PKCE State Format Migration
+
+The 0.10.0+ PKCE format separates the OAuth URL `state` from the PKCE verifier cookie. Sign-in attempts started with the **previous shared state/cookie format** cannot be completed on an updated instance, and new-format callbacks cannot be handled by an old instance.
+
+This means **old-format callbacks reaching updated instances will fail**, and **new-format callbacks reaching old instances will also fail**. To minimise disruption:
+
+- **Deploy all instances serving sign-in and callback requests together** — for example, with a coordinated cutover to the updated instances rather than a rolling deployment.
+- Users who had a sign-in in progress during the cutover will need to restart their sign-in flow. Because the PKCE verifier cookie is short-lived (10 minutes), the window of impact is narrow.
+- Existing authenticated sessions are unaffected and do not need to re-authenticate.

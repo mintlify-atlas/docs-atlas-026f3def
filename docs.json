@@ -1,72 +1,103 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mintlify Starter Kit",
+  "name": "AuthKit React Router",
+  "theme": "luma",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#5468ff",
+    "light": "#f44452",
+    "dark": "#141414"
   },
-  "favicon": "/favicon.svg",
-  "navigation": {
-    "pages": [
-      {
-        "group": "Getting Started",
-        "pages": [
-          "index",
-          "quickstart"
-        ]
-      }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
+  "favicon": "https://media.brand.dev/ab779e86-84f8-4672-9e02-a419ec1dc1e1.png",
   "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:support@mintlify.com"
-      }
-    ],
     "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://app.mintlify.com"
+      "type": "github",
+      "href": "https://github.com/workos/authkit-react-router"
     }
-  },
-  "contextual": {
-    "options": [
-      "copy",
-      "view",
-      "chatgpt",
-      "claude",
-      "perplexity",
-      "mcp",
-      "cursor",
-      "vscode"
-    ]
   },
   "footer": {
     "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
+      "github": "https://github.com/workos/authkit-react-router"
     }
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "configuration"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "guides/session-management",
+              "guides/protecting-routes",
+              "guides/sign-in-sign-out",
+              "guides/public-client-mode"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "guides/feature-flags",
+              "guides/custom-session-storage",
+              "guides/access-tokens",
+              "guides/organization-switching",
+              "guides/custom-auth-flows"
+            ]
+          },
+          {
+            "group": "Migration & Troubleshooting",
+            "pages": [
+              "guides/migrating-from-0-4",
+              "guides/troubleshooting"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Loaders",
+            "pages": [
+              "api-reference/authkit-loader",
+              "api-reference/auth-loader",
+              "api-reference/with-auth"
+            ]
+          },
+          {
+            "group": "Auth Helpers",
+            "pages": [
+              "api-reference/get-sign-in-url",
+              "api-reference/get-sign-up-url",
+              "api-reference/sign-out",
+              "api-reference/switch-to-organization"
+            ]
+          },
+          {
+            "group": "Session & Config",
+            "pages": [
+              "api-reference/configure",
+              "api-reference/save-session",
+              "api-reference/refresh-session",
+              "api-reference/get-workos",
+              "api-reference/get-feature-flags-runtime-client"
+            ]
+          },
+          {
+            "group": "Types",
+            "pages": [
+              "api-reference/types"
+            ]
+          }
+        ]
+      }
+    ]
   }
 }

@@ -1,0 +1,143 @@
+---
+title: "configure — Set Up AuthKit React Router Programmatically"
+sidebarTitle: "configure"
+description: "configure() sets AuthKit React Router options programmatically, overriding environment variables. Accepts an options object, a custom env source, or both."
+---
+
+`configure` sets AuthKit React Router options at runtime from code rather than environment variables. Use it when you need to supply configuration dynamically — for example when bootstrapping from a secret manager, running in a non-Node.js runtime such as Deno or Edge functions, or writing tests that need isolated config values. Any value supplied via `configure` takes the highest precedence (above `process.env`).
+
+## Import
+
+```ts
+import { configure } from '@workos-inc/authkit-react-router';
+```
+
+## Signatures
+
+<Tabs>
+  <Tab title="Config object">
+    ```ts
+    configure(config: Partial<AuthKitConfig>): void
+    ```
+
+    Pass a plain object with any subset of the `AuthKitConfig` fields. Unset fields continue to fall through to environment variables and built-in defaults.
+  </Tab>
+
+  <Tab title="Custom env source">
+    ```ts
+    configure(source: (key: string) => any): void
+    ```
+
+    Pass a function that receives an uppercase `WORKOS_*` environment variable name and returns its value. Use this overload to read config from runtimes that don't expose `process.env`, such as `Deno.env.get`.
+  </Tab>
+
+  <Tab title="Both">
+    ```ts
+    configure(config: Partial<AuthKitConfig>, source: ValueSource): void
+    ```
+
+    Combine an explicit config object with a custom env source. Explicit fields in `config` win, the source is queried for anything not covered, and built-in defaults fill the rest.
+
+    ```ts
+    // ValueSource can also be a plain object:
+    type ValueSource = Record<string, any> | ((key: string) => any);
+    ```
+  </Tab>
+</Tabs>
+
+## Parameters
+
+<ParamField body="config" type="Partial<AuthKitConfig>" optional>
+  A partial configuration object. Any fields provided here take the highest priority, above environment variables and defaults. See [Config Options](#config-options) for the full list of fields.
+</ParamField>
+
+<ParamField body="source" type="(key: string) => any | Record<string, any>" optional>
+  A custom environment variable source. When provided as a function, it is called with the uppercase `WORKOS_*` key name (e.g. `"WORKOS_CLIENT_ID"`) and must return the corresponding value. Can also be a plain object whose keys are the `WORKOS_*` variable names. Only used on the first resolution of each key; explicit `config` fields always win.
+</ParamField>
+
+## Config Options
+
+| Field | Environment Variable | Type | Default | Required | Description |
+|---|---|---|---|---|---|
+| `clientId` | `WORKOS_CLIENT_ID` | `string` | — | Yes | Your WorkOS Client ID |
+| `apiKey` | `WORKOS_API_KEY` | `string` | — | No | Your WorkOS API key. Required for feature flags and management APIs. Omit for [public client mode](/api-reference/get-feature-flags-runtime-client#warning). |
+| `redirectUri` | `WORKOS_REDIRECT_URI` | `string` | — | Yes | The callback URL configured in your WorkOS dashboard |
+| `cookiePassword` | `WORKOS_COOKIE_PASSWORD` | `string` | — | Yes | Password used to encrypt the session cookie. Must be at least 32 characters. |
+| `cookieName` | `WORKOS_COOKIE_NAME` | `string` | `"wos-session"` | No | Name of the session cookie |
+| `apiHttps` | `WORKOS_API_HTTPS` | `boolean` | `true` | No | Whether to use HTTPS for WorkOS API calls |
+| `cookieMaxAge` | `WORKOS_COOKIE_MAX_AGE` | `number` | `34560000` (400 days) | No | Maximum age of the session cookie in seconds |
+| `apiHostname` | `WORKOS_API_HOSTNAME` | `string` | `"api.workos.com"` | No | WorkOS API hostname |
+| `apiPort` | `WORKOS_API_PORT` | `number` | — | No | Port to use for WorkOS API calls |
+| `issuer` | `WORKOS_ISSUER` | `string \| string[]` | API origin | No | Expected `iss` claim of WorkOS access tokens. Use a comma-separated string in env vars to supply multiple accepted values. |
+
+<Note>
+  `cookiePassword` must be at least 32 characters long. `configure` throws immediately if a shorter value is supplied.
+</Note>
+
+## Examples
+
+### Confidential client (with API key)
+
+A confidential client holds a WorkOS API key on the server. This unlocks feature flags (`getFeatureFlagsRuntimeClient`) and direct WorkOS management API calls via `getWorkOS()`.
+
+```ts
+import { configure } from '@workos-inc/authkit-react-router';
+
+configure({
+  clientId: 'client_1234567890',
+  redirectUri: 'http://localhost:5173/callback',
+  cookiePassword: 'your-secure-cookie-password-min-32-chars',
+  apiKey: 'sk_test_1234567890',
+  // Optional overrides
+  cookieName: 'my-custom-cookie',
+  apiHttps: true,
+  cookieMaxAge: 60 * 60 * 24 * 30, // 30 days
+});
+```
+
+### Public client (keyless, no API key)
+
+Omit `apiKey` to run AuthKit as a PKCE public client. Sign-in, callback, session refresh, and sign-out all work. Feature flags and WorkOS management APIs are unavailable.
+
+```ts
+import { configure } from '@workos-inc/authkit-react-router';
+
+configure({
+  clientId: 'client_1234567890',
+  redirectUri: 'http://localhost:5173/callback',
+  cookiePassword: 'your-secure-cookie-password-min-32-chars',
+});
+```
+
+### Custom environment source (Deno)
+
+Supply a function to read environment variables from non-Node.js runtimes.
+
+```ts
+import { configure } from '@workos-inc/authkit-react-router';
+
+configure((key) => Deno.env.get(key));
+```
+
+### Combined: explicit values and custom source
+
+Provide some values explicitly while delegating the rest to a custom source.
+
+```ts
+import { configure } from '@workos-inc/authkit-react-router';
+
+configure(
+  { clientId: 'client_1234567890' },
+  (key) => Deno.env.get(key),
+);
+```
+
+## Priority
+
+<Note>
+  Configuration values are resolved in the following order:
+
+  1. **Programmatic config** — values passed directly to `configure()`
+  2. **Environment variables** — `WORKOS_*` variables from the active source (defaults to `process.env`)
+  3. **Built-in defaults** — e.g. `cookieName: "wos-session"`, `apiHttps: true`, `cookieMaxAge: 34560000`, `apiHostname: "api.workos.com"`
+</Note>

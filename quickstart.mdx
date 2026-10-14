@@ -1,47 +1,173 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get Started with AuthKit React Router"
+sidebarTitle: "Quickstart"
+description: "Add WorkOS AuthKit authentication to your React Router 7+ application in five steps — from installation to your first protected route."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
-
-## Prerequisites
-
-Before you begin, you must have:
-
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
-
-## Get started
-
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
 
-    ```bash
-    npm install your-package
-    ```
-  </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+  <Step title="Install the package">
 
-    ```bash
-    your-cli init
-    ```
-  </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
+    Add `@workos-inc/authkit-react-router` to your project:
 
-    ```bash
-    your-cli start
+    <CodeGroup>
+
+    ```bash npm
+    npm install @workos-inc/authkit-react-router
     ```
+
+    ```bash yarn
+    yarn add @workos-inc/authkit-react-router
+    ```
+
+    ```bash pnpm
+    pnpm add @workos-inc/authkit-react-router
+    ```
+
+    </CodeGroup>
+
   </Step>
+
+  <Step title="Configure environment variables">
+
+    Create or update `.env.local` at the root of your project with your WorkOS credentials:
+
+    ```bash .env.local
+    WORKOS_CLIENT_ID="client_..."
+    WORKOS_REDIRECT_URI="http://localhost:5173/callback"
+    WORKOS_COOKIE_PASSWORD="<your-32-character-password>"
+    WORKOS_API_KEY="sk_test_..."  # optional — omit for keyless (public-client) mode
+    ```
+
+    <Note>
+      `WORKOS_COOKIE_PASSWORD` is used to encrypt the session cookie with iron-session. It must be **at least 32 characters** long. You can generate a strong password with `openssl rand -base64 32`.
+    </Note>
+
+    <Tip>
+      Retrieve your **Client ID**, **API Key**, and configure your **Redirect URI** in the [WorkOS Dashboard](https://dashboard.workos.com). The redirect URI you set here must match exactly what you register under **Redirects** in your WorkOS application settings.
+    </Tip>
+
+  </Step>
+
+  <Step title="Add the callback route">
+
+    AuthKit needs a dedicated route to handle the OAuth callback from WorkOS. Create `app/routes/callback.ts` and export `authLoader()` as the route loader:
+
+    ```ts app/routes/callback.ts
+    import { authLoader } from '@workos-inc/authkit-react-router';
+
+    export const loader = authLoader();
+    ```
+
+    `authLoader` verifies the PKCE + CSRF state, exchanges the authorization code for tokens, encrypts them into a session cookie, and redirects the user back to your app.
+
+    <Note>
+      The path of this route must match the value of `WORKOS_REDIRECT_URI`. For example, if your redirect URI is `http://localhost:5173/callback`, the file should be `app/routes/callback.ts` so that React Router maps it to `/callback`.
+    </Note>
+
+    You can also control where the user lands after a successful sign-in:
+
+    ```ts app/routes/callback.ts
+    import { authLoader } from '@workos-inc/authkit-react-router';
+
+    export const loader = authLoader({ returnPathname: '/dashboard' });
+    ```
+
+  </Step>
+
+  <Step title="Create sign-in and sign-up routes">
+
+    `getSignInUrl` and `getSignUpUrl` each return a `{ url, headers }` object. The `headers` contain a short-lived `Set-Cookie` that binds the PKCE verifier and CSRF nonce to the current browser. **These headers must travel to the browser on the same redirect that sends the user to AuthKit** — create dedicated redirect-only routes rather than pre-rendering the URL into a link.
+
+    ```ts app/routes/login.ts
+    import { redirect, type LoaderFunctionArgs } from 'react-router';
+    import { getSignInUrl } from '@workos-inc/authkit-react-router';
+
+    export async function loader({ request }: LoaderFunctionArgs) {
+      const url = new URL(request.url);
+      const { url: authUrl, headers } = await getSignInUrl(
+        url.searchParams.get('returnTo') ?? undefined,
+        request,
+      );
+      return redirect(authUrl, { headers });
+    }
+    ```
+
+    ```ts app/routes/signup.ts
+    import { redirect, type LoaderFunctionArgs } from 'react-router';
+    import { getSignUpUrl } from '@workos-inc/authkit-react-router';
+
+    export async function loader({ request }: LoaderFunctionArgs) {
+      const url = new URL(request.url);
+      const { url: authUrl, headers } = await getSignUpUrl(
+        url.searchParams.get('returnTo') ?? undefined,
+        request,
+      );
+      return redirect(authUrl, { headers });
+    }
+    ```
+
+    From any page in your app, link to these routes:
+
+    ```tsx
+    import { Link } from 'react-router';
+
+    export default function HomePage() {
+      return (
+        <>
+          <Link to="/login">Log in</Link>
+          <Link to="/signup">Sign up</Link>
+        </>
+      );
+    }
+    ```
+
+    Passing `request` as the second argument to `getSignInUrl` / `getSignUpUrl` ensures the `Secure` attribute on the PKCE cookie matches your app's live protocol — important in local development where your app runs on `http://localhost` even if `WORKOS_REDIRECT_URI` points to an `https://` URL.
+
+  </Step>
+
+  <Step title="Protect a route">
+
+    Use `authkitLoader` with `ensureSignedIn: true` on any route that requires authentication. Unauthenticated visitors are automatically redirected to WorkOS AuthKit. The loader merges `user`, `sessionId`, `organizationId`, `role`, `permissions`, `entitlements`, `featureFlags`, and `impersonator` into the data returned by `useLoaderData`.
+
+    ```tsx app/routes/dashboard.tsx
+    import { type LoaderFunctionArgs, useLoaderData } from 'react-router';
+    import { authkitLoader } from '@workos-inc/authkit-react-router';
+
+    export const loader = (args: LoaderFunctionArgs) =>
+      authkitLoader(args, { ensureSignedIn: true });
+
+    export default function Dashboard() {
+      const { user } = useLoaderData<typeof loader>();
+
+      return (
+        <main>
+          <h1>Welcome back{user.firstName ? `, ${user.firstName}` : ''}!</h1>
+          <p>Email: {user.email}</p>
+        </main>
+      );
+    }
+    ```
+
+    Because `ensureSignedIn: true` is set, TypeScript knows `user` is never `null` inside this component. For routes where both signed-in and anonymous visitors are allowed, omit the option and check `user !== null` yourself.
+
+  </Step>
+
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+## Next Steps
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
-</Tip>
+<CardGroup cols={2}>
+  <Card title="Configure AuthKit" icon="gear" href="/configuration">
+    Explore all environment variables, the programmatic `configure()` API, custom environment sources, and public-client (keyless) mode.
+  </Card>
+  <Card title="Session Management" icon="clock-rotate-left" href="/guides/session-management">
+    Learn how encrypted cookie sessions work, how to use custom session storage, and how to access or refresh tokens directly.
+  </Card>
+  <Card title="Sign-In & Sign-Out" icon="arrow-right-to-bracket" href="/guides/sign-in-sign-out">
+    Deep-dive into sign-in and sign-up URL generation, the Initiate Login URI pattern, and how to implement sign-out with optional redirect.
+  </Card>
+  <Card title="Protecting Routes" icon="shield" href="/guides/protecting-routes">
+    Understand the difference between `authkitLoader`, `withAuth`, `ensureSignedIn`, and how to build fine-grained access control.
+  </Card>
+</CardGroup>

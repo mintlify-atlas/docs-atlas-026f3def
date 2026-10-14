@@ -1,0 +1,108 @@
+---
+title: "Feature Flags with WorkOS AuthKit Runtime Client"
+sidebarTitle: "Feature Flags"
+description: "Evaluate feature flags server-side using the WorkOS Feature Flags runtime client in authkitLoader, independent of JWT claims."
+---
+
+`authkitLoader` supports two approaches to feature flags: reading flag state directly from the access token's JWT claims, or evaluating flags at request time using the WorkOS Feature Flags runtime client. The JWT-based approach is zero-configuration but only reflects changes after a token refresh. The runtime client evaluates flags independently of the session lifecycle, keeping flag state in sync in the background.
+
+## JWT-Based Feature Flags (Default)
+
+Without any additional configuration, `authkitLoader` reads `featureFlags` from the `feature_flags` claim embedded in the WorkOS access token. This value is available as `auth.featureFlags` in your loader and as `featureFlags` in your component's loader data.
+
+```tsx
+import { type LoaderFunctionArgs, useLoaderData } from 'react-router';
+import { authkitLoader } from '@workos-inc/authkit-react-router';
+
+export const loader = (args: LoaderFunctionArgs) => authkitLoader(args);
+
+export function Dashboard() {
+  const { featureFlags } = useLoaderData<typeof loader>();
+  const hasAdvancedAnalytics = featureFlags?.includes('advanced-analytics');
+
+  return hasAdvancedAnalytics ? <AdvancedAnalytics /> : <BasicAnalytics />;
+}
+```
+
+Because flag values are baked into the access token at issuance, changes to flag configuration in the WorkOS dashboard are only reflected after the user's access token refreshes (typically when it expires). For small, stable flag sets this is convenient and requires no extra infrastructure.
+
+## Feature Flags Runtime Client
+
+For flag evaluation that stays in sync independently of the user's session, use the WorkOS Feature Flags runtime client. The runtime client keeps flag configuration in memory and syncs changes in the background. It should be created **once per server process** — not once per request — and shared across all loaders that need it.
+
+Call `getFeatureFlagsRuntimeClient()` at the module level to get a shared singleton, then pass it to `authkitLoader` via the `featureFlags.runtimeClient` option:
+
+```tsx
+import { type LoaderFunctionArgs, useLoaderData } from 'react-router';
+import { authkitLoader, getFeatureFlagsRuntimeClient } from '@workos-inc/authkit-react-router';
+
+// Create once per server process — shared across all requests
+const featureFlags = getFeatureFlagsRuntimeClient();
+
+export const loader = (args: LoaderFunctionArgs) =>
+  authkitLoader(args, {
+    featureFlags: {
+      runtimeClient: featureFlags,
+      waitUntilReady: { timeoutMs: 5000 },
+    },
+    onFeatureFlagsError: ({ error }) => {
+      console.error('Feature flags runtime client failed:', error);
+    },
+  });
+
+export function Dashboard() {
+  const { featureFlags } = useLoaderData<typeof loader>();
+  const hasAdvancedAnalytics = featureFlags?.includes('advanced-analytics');
+
+  return hasAdvancedAnalytics ? <AdvancedAnalytics /> : <BasicAnalytics />;
+}
+```
+
+When `featureFlags.runtimeClient` is set, `authkitLoader` evaluates all flags using the signed-in user's `userId` and current `organizationId` as the evaluation context, then returns only the flags that are enabled as a string array — the same shape as the JWT-based `featureFlags`. Downstream route code can continue reading `auth.featureFlags` as before.
+
+The `waitUntilReady` option tells `authkitLoader` to wait for the runtime client to finish its initial sync before serving the request. Pass `{ timeoutMs: 5000 }` to set a maximum wait time in milliseconds, or `true` to wait indefinitely. If `waitUntilReady` is omitted, the loader uses whatever flag state the client has already loaded.
+
+## Fallback Behavior
+
+If runtime evaluation fails for any reason (network error, timeout, misconfiguration), `authkitLoader` automatically falls back to the JWT `feature_flags` claim so that authentication can continue without interruption.
+
+When a fallback occurs, `onFeatureFlagsError` is called with an object containing:
+
+| Property           | Type            | Description                                        |
+| ------------------ | --------------- | -------------------------------------------------- |
+| `error`            | `unknown`       | The error thrown by the runtime client             |
+| `request`          | `Request`       | The incoming request                               |
+| `user`             | `User`          | The currently authenticated user                  |
+| `organizationId`   | `string \| null` | The user's current organization ID                |
+| `tokenFeatureFlags`| `string[]`      | The flag values read from the JWT (used as fallback) |
+
+Use `onFeatureFlagsError` to report fallbacks to your monitoring or alerting system. When `debug: true` is also enabled on `authkitLoader`, the fallback additionally emits a warning to the server console.
+
+## Singleton Options
+
+`getFeatureFlagsRuntimeClient()` accepts an optional `options` object (of type `RuntimeClientOptions` from `@workos-inc/node`) to configure the runtime client on creation:
+
+```ts
+import { getFeatureFlagsRuntimeClient } from '@workos-inc/authkit-react-router';
+
+const featureFlags = getFeatureFlagsRuntimeClient({
+  // RuntimeClientOptions passed on first creation only
+});
+```
+
+Options are applied **only when the client is created for the first time**. Subsequent calls to `getFeatureFlagsRuntimeClient()` — with or without options — return the same singleton instance that was created on the first call. If you need different options for different contexts, create separate module-level instances.
+
+## API Key Requirement
+
+<Warning>
+  Feature flags require a WorkOS API key. Set `WORKOS_API_KEY` in your environment or pass `apiKey`
+  to `configure()`. Calling `getFeatureFlagsRuntimeClient()` in public-client (keyless) mode throws:
+
+  ```
+  Feature flags require a WorkOS API key; set WORKOS_API_KEY or configure({ apiKey }). Public-client (keyless) mode supports sign-in only.
+  ```
+
+  See the [configuration docs](/configuration) for details on keyless mode.
+</Warning>
+
+For the full API reference, see [getFeatureFlagsRuntimeClient](/api-reference/get-feature-flags-runtime-client).
