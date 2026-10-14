@@ -361,3 +361,90 @@ export interface GetAuthURLResult {
   return redirect(url, { headers });
   ```
 </ResponseField>
+
+---
+
+## `AuthLoaderSuccessData`
+
+Passed to the `onSuccess` callback of `authLoader()` after a successful OAuth callback. Contains the full authentication result including tokens, user, and optional OAuth tokens.
+
+```ts
+export interface AuthLoaderSuccessData {
+  accessToken: string;
+  impersonator: Impersonator | null;
+  oauthTokens: OauthTokens | null;
+  refreshToken: string;
+  user: User;
+  organizationId: string | null;
+  authenticationMethod?: AuthenticationResponse['authenticationMethod'];
+  state?: string;
+}
+```
+
+<ResponseField name="accessToken" type="string" required>
+  The WorkOS access token (a signed JWT) issued after a successful authentication.
+</ResponseField>
+
+<ResponseField name="refreshToken" type="string" required>
+  The WorkOS refresh token used to obtain new access tokens when the current one expires.
+</ResponseField>
+
+<ResponseField name="user" type="User" required>
+  The authenticated WorkOS `User` object.
+</ResponseField>
+
+<ResponseField name="organizationId" type="string | null" required>
+  The organization the user authenticated into, or `null` if no organization context was set.
+</ResponseField>
+
+<ResponseField name="impersonator" type="Impersonator | null" required>
+  Non-null when an admin is impersonating this user from the WorkOS dashboard.
+</ResponseField>
+
+<ResponseField name="oauthTokens" type="OauthTokens | null" required>
+  OAuth tokens from the identity provider (e.g. Google or GitHub), if the user authenticated via a social connection and the connection is configured to return them. `null` otherwise.
+</ResponseField>
+
+<ResponseField name="authenticationMethod" type="string" optional>
+  The authentication method used (e.g. `"GoogleOAuth"`, `"Password"`, `"MagicAuth"`). Value is the `authenticationMethod` field from the WorkOS `AuthenticationResponse`.
+</ResponseField>
+
+<ResponseField name="state" type="string" optional>
+  Custom state value passed to `getSignInUrl` / `getSignUpUrl` via the `state` option, echoed back after a successful callback.
+</ResponseField>
+
+---
+
+## `Session`
+
+The internal session object sealed into the encrypted cookie. Returned by `saveSession` and used internally by `refreshSession` and `authkitLoader`.
+
+```ts
+export interface Session {
+  accessToken: string;
+  refreshToken: string;
+  user: User;
+  impersonator?: Impersonator;
+  headers: Record<string, string>;
+}
+```
+
+<ResponseField name="accessToken" type="string" required>
+  The WorkOS access token (a signed JWT).
+</ResponseField>
+
+<ResponseField name="refreshToken" type="string" required>
+  The WorkOS refresh token.
+</ResponseField>
+
+<ResponseField name="user" type="User" required>
+  The authenticated WorkOS `User` object.
+</ResponseField>
+
+<ResponseField name="impersonator" type="Impersonator | undefined" optional>
+  Present when an admin is impersonating this user via the WorkOS dashboard.
+</ResponseField>
+
+<ResponseField name="headers" type="Record<string, string>" required>
+  After a call to `saveSession`, this contains `{ "Set-Cookie": "<sealed-session-cookie>" }`. You must attach this header to your response so the browser stores the session. Before `saveSession` writes it, it starts as an empty object.
+</ResponseField>

@@ -54,7 +54,7 @@ refreshSession(
     </ResponseField>
 
     <ResponseField name="organizationId" type="string | undefined">
-      The organization ID encoded in the new access token's `org_id` claim, if any.
+      The organization ID encoded in the new access token's `org_id` claim. `undefined` when the token carries no organization context.
     </ResponseField>
 
     <ResponseField name="role" type="string | undefined">
@@ -78,7 +78,7 @@ refreshSession(
     </ResponseField>
 
     <ResponseField name="impersonator" type="Impersonator | null">
-      Present when an admin is impersonating this user. Contains `email` and `reason`.
+      Non-null when an admin is impersonating this user. Contains `email` and `reason`.
     </ResponseField>
 
     <ResponseField name="sealedSession" type="string | undefined">
@@ -91,7 +91,15 @@ refreshSession(
   </Expandable>
 </ResponseField>
 
-## Example
+## Behavior when no session exists
+
+If no valid session is found in the request cookies, `refreshSession` **throws a redirect** to the WorkOS authorization URL so the user can sign in. It does not return `null` or an error — the thrown value is a `Response` with a redirect status, which React Router will propagate automatically if you use `throw` or leave it uncaught.
+
+<Warning>
+  `refreshSession` throws a redirect — not an error — when no session exists or when the stored refresh token has expired or been revoked. Wrap calls in `try/catch` only if you need to handle these redirects explicitly; otherwise let React Router propagate them.
+</Warning>
+
+## Examples
 
 ### Refresh in an action and use the new access token
 
@@ -100,7 +108,8 @@ import { type ActionFunctionArgs } from 'react-router';
 import { refreshSession } from '@workos-inc/authkit-react-router';
 
 export async function action({ request }: ActionFunctionArgs) {
-  // Exchange the stored refresh token for a new access token
+  // Exchange the stored refresh token for a new access token.
+  // Throws a redirect if no session is found.
   const { accessToken, user, headers } = await refreshSession(request);
 
   // Use the fresh token to call a downstream API
@@ -139,7 +148,3 @@ export async function action({ request }: ActionFunctionArgs) {
   return redirect('/dashboard', { headers });
 }
 ```
-
-<Note>
-  If no valid session exists in the request cookies, `refreshSession` throws a redirect to the WorkOS authorization URL so the user can sign in. If the stored refresh token has expired or been revoked, `refreshSession` also throws a redirect. In both cases the thrown `Response` is a `redirect` and will be caught by React Router's error boundary or propagated automatically if you use `throw`.
-</Note>

@@ -4,7 +4,7 @@ sidebarTitle: "configure"
 description: "configure() sets AuthKit React Router options programmatically, overriding environment variables. Accepts an options object, a custom env source, or both."
 ---
 
-`configure` sets AuthKit React Router options at runtime from code rather than environment variables. Use it when you need to supply configuration dynamically — for example when bootstrapping from a secret manager, running in a non-Node.js runtime such as Deno or Edge functions, or writing tests that need isolated config values. Any value supplied via `configure` takes the highest precedence (above `process.env`).
+`configure` sets AuthKit React Router options at runtime from code rather than environment variables. Use it when you need to supply configuration dynamically — for example when bootstrapping from a secret manager, running in a non-Node.js runtime such as Deno or Edge functions, or writing tests that need isolated config values.
 
 ## Import
 
@@ -36,7 +36,7 @@ import { configure } from '@workos-inc/authkit-react-router';
     configure(config: Partial<AuthKitConfig>, source: ValueSource): void
     ```
 
-    Combine an explicit config object with a custom env source. Explicit fields in `config` win, the source is queried for anything not covered, and built-in defaults fill the rest.
+    Combine an explicit config object with a custom env source. The source is queried for keys not found in the environment, and built-in defaults fill the rest.
 
     ```ts
     // ValueSource can also be a plain object:
@@ -48,11 +48,11 @@ import { configure } from '@workos-inc/authkit-react-router';
 ## Parameters
 
 <ParamField body="config" type="Partial<AuthKitConfig>" optional>
-  A partial configuration object. Any fields provided here take the highest priority, above environment variables and defaults. See [Config Options](#config-options) for the full list of fields.
+  A partial configuration object. Fields provided here take effect after environment variable resolution. See [Config Options](#config-options) for the full list of fields.
 </ParamField>
 
 <ParamField body="source" type="(key: string) => any | Record<string, any>" optional>
-  A custom environment variable source. When provided as a function, it is called with the uppercase `WORKOS_*` key name (e.g. `"WORKOS_CLIENT_ID"`) and must return the corresponding value. Can also be a plain object whose keys are the `WORKOS_*` variable names. Only used on the first resolution of each key; explicit `config` fields always win.
+  A custom environment variable source. When provided as a function, it is called with the uppercase `WORKOS_*` key name (e.g. `"WORKOS_CLIENT_ID"`) and must return the corresponding value. Can also be a plain object whose keys are the `WORKOS_*` variable names. This source replaces `process.env` as the environment variable backend.
 </ParamField>
 
 ## Config Options
@@ -72,6 +72,22 @@ import { configure } from '@workos-inc/authkit-react-router';
 
 <Note>
   `cookiePassword` must be at least 32 characters long. `configure` throws immediately if a shorter value is supplied.
+</Note>
+
+<Note>
+  `apiKey` is intentionally optional. Without it, AuthKit runs as a PKCE public client (sign-in only). See [Public client mode](#public-client-keyless-mode) below.
+</Note>
+
+## Priority
+
+Configuration values are resolved in the following order:
+
+1. **Environment variables** — `WORKOS_*` variables from the active source (defaults to `process.env`). These take highest precedence at runtime.
+2. **Programmatic config** — values passed directly to `configure()` as an object. Applied after env var lookup.
+3. **Built-in defaults** — e.g. `cookieName: "wos-session"`, `apiHttps: true`, `cookieMaxAge: 34560000` (400 days), `apiHostname: "api.workos.com"`.
+
+<Note>
+  Environment variables always win over programmatic config values. If you need a value to take absolute precedence, avoid setting the corresponding `WORKOS_*` environment variable.
 </Note>
 
 ## Examples
@@ -132,12 +148,39 @@ configure(
 );
 ```
 
-## Priority
+## Public client (keyless) mode
+
+If your service only signs users in and should not hold a WorkOS API key, leave `WORKOS_API_KEY` unset (or omit `apiKey` from `configure`). AuthKit then runs as an OAuth PKCE public client.
+
+What works without a key: sign-in and sign-up URLs, the callback (`authLoader`), `authkitLoader` (including automatic refresh), `withAuth`, `refreshSession`, `switchToOrganization`, `saveSession`, and `signOut`.
+
+What requires a key:
+- Feature flags — `getFeatureFlagsRuntimeClient()` throws in keyless mode.
+- Direct WorkOS management calls through `getWorkOS()`, such as `organizations.*` or `userManagement.getUser`.
+
+<Warning>
+  The WorkOS Node SDK falls back to `process.env.WORKOS_API_KEY` when no key is configured programmatically. If that variable is set in the server's environment, a key is always in play even when you use a custom value source with `configure()`. To run fully keyless, make sure `WORKOS_API_KEY` is absent from the process environment.
+</Warning>
+
+## `getConfig`
+
+`getConfig` is the companion accessor that reads a single resolved configuration value by key. It applies the same priority order (env vars → programmatic config → defaults) and throws a descriptive error if a required key is missing.
+
+```ts
+import { getConfig } from '@workos-inc/authkit-react-router';
+
+getConfig<K extends keyof AuthKitConfig>(key: K): AuthKitConfig[K]
+```
+
+### Example
+
+```ts
+import { getConfig } from '@workos-inc/authkit-react-router';
+
+const clientId = getConfig('clientId');
+const cookieName = getConfig('cookieName'); // 'wos-session' by default
+```
 
 <Note>
-  Configuration values are resolved in the following order:
-
-  1. **Programmatic config** — values passed directly to `configure()`
-  2. **Environment variables** — `WORKOS_*` variables from the active source (defaults to `process.env`)
-  3. **Built-in defaults** — e.g. `cookieName: "wos-session"`, `apiHttps: true`, `cookieMaxAge: 34560000`, `apiHostname: "api.workos.com"`
+  `getConfig` is primarily intended for internal use within AuthKit. Prefer reading configuration from environment variables or calling `configure()` at app startup rather than reading individual keys at runtime.
 </Note>

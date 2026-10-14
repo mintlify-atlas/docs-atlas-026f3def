@@ -1,7 +1,7 @@
 ---
 title: "authkitLoader — React Router Authentication Loader"
 sidebarTitle: "authkitLoader"
-description: "authkitLoader wraps React Router loaders to automatically verify sessions, refresh access tokens, and expose auth data including user, roles, and feature flags."
+description: "authkitLoader wraps React Router loaders to verify sessions, refresh tokens, and expose auth data including user, roles, permissions, and feature flags."
 ---
 
 `authkitLoader` is the primary API for building authenticated routes with `@workos-inc/authkit-react-router`. Drop it into any route loader and it handles the full authentication lifecycle for you: reading the encrypted session cookie, verifying the access token's signature and expiry, transparently refreshing it with the refresh token when necessary, writing the updated `Set-Cookie` header back to the browser, and exposing a typed auth object — including `user`, `sessionId`, `organizationId`, `role`, `permissions`, `entitlements`, `featureFlags`, and `impersonator` — to your component via `useLoaderData`. When `ensureSignedIn: true` is set, unauthenticated visitors are automatically redirected to WorkOS AuthKit before the route renders.

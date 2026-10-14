@@ -86,8 +86,8 @@ export const loader = (args: LoaderFunctionArgs) =>
     args,
     async ({ auth, getAccessToken }) => {
       // ensureSignedIn: true guarantees auth.user is non-null
-      // and getAccessToken() always returns a string
-      const accessToken = getAccessToken() as string;
+      // and getAccessToken() is typed () => string — no null check needed
+      const accessToken = getAccessToken();
 
       const protectedData = await fetchProtectedData(accessToken);
 

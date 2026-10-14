@@ -1,5 +1,5 @@
 ---
-title: "Public Client (Keyless) Mode"
+title: "Public Client (Keyless) Mode in AuthKit React Router"
 sidebarTitle: "Public Client Mode"
 description: "Run AuthKit React Router without a server-held WorkOS API key using PKCE public client mode — ideal for services that only need sign-in."
 ---
@@ -63,19 +63,21 @@ const confidential: AuthKitConfidentialConfig = {
   cookieName: 'wos-session',
 };
 
-// AuthKitPublicConfig — apiKey must not be set
+// AuthKitPublicConfig — apiKey?: never (must be omitted)
 const publicClient: AuthKitPublicConfig = {
   clientId: 'client_...',
   redirectUri: 'https://your-app.com/callback',
   cookiePassword: 'your-32-char-minimum-password',
-  // apiKey is `never` in this variant — omit it entirely
+  // apiKey?: never in this variant — TypeScript prevents setting it
   apiHttps: true,
   cookieMaxAge: 34560000,
   cookieName: 'wos-session',
 };
 
 // The union type:
-// type AuthKitConfig = AuthKitConfidentialConfig | AuthKitPublicConfig;
+// type AuthKitConfig = AuthKitConfidentialConfig | AuthKitPublicConfig
+// AuthKitConfidentialConfig: apiKey: string   (required)
+// AuthKitPublicConfig:       apiKey?: never   (must be absent)
 ```
 
 Because configuration is resolved from the environment at runtime, `getConfig('apiKey')` is typed `string | undefined`. Code that needs to branch on the presence of an API key should check the returned value rather than assuming it is always present.

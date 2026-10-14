@@ -1,16 +1,16 @@
 ---
-title: "Configure AuthKit React Router"
+title: "Configure AuthKit React Router: All Options and Env Vars"
 sidebarTitle: "Configuration"
 description: "Set up AuthKit React Router using environment variables, the configure() function, or a custom environment source for Deno and Edge runtimes."
 ---
 
 AuthKit React Router resolves its configuration from three sources, applied in the following priority order:
 
-1. **Programmatic values** supplied via `configure()` at startup.
-2. **Environment variables** prefixed with `WORKOS_`, read at runtime from `process.env` (or a custom source you register).
+1. **Environment variables** prefixed with `WORKOS_`, read at runtime from `process.env` (or a custom source you register).
+2. **Programmatic values** supplied via `configure()` at startup.
 3. **Default values** for optional settings.
 
-The most common approach is to set environment variables and let the library pick them up automatically. Use `configure()` when you need override values in code, or when you are deploying to a runtime that does not expose `process.env`.
+The most common approach is to set environment variables and let the library pick them up automatically. Use `configure()` when you need to supply values in code or when you are deploying to a runtime that does not expose `process.env`.
 
 ## Environment Variables
 
@@ -67,7 +67,9 @@ configure({
 });
 ```
 
-Programmatic values take the highest priority, overriding any environment variables that are also set. This makes `configure()` useful for test environments where you want deterministic values regardless of the process environment.
+<Note>
+  Environment variables take precedence over programmatic `configure()` values. If both `WORKOS_CLIENT_ID` and `configure({ clientId: '...' })` are set, the environment variable wins. Use `configure()` when environment variables are absent or when running in a runtime without `process.env`.
+</Note>
 
 ## Custom Environment Source
 
@@ -93,9 +95,9 @@ The function receives the full `WORKOS_`-prefixed environment variable name (e.g
 
 When the library resolves a configuration value, it checks sources in this order:
 
-1. **Programmatic `configure()` values** — the highest priority. Explicit values here override everything else.
-2. **Environment variables** — the `WORKOS_`-prefixed variables from `process.env` (or your custom source). Checked after programmatic values.
-3. **Default values** — built-in defaults for optional settings such as `cookieName: 'wos-session'`, `apiHttps: true`, `cookieMaxAge: 34560000`, and `apiHostname: 'api.workos.com'`.
+1. **Environment variables** — the `WORKOS_`-prefixed variables from `process.env` (or your custom source). Checked first, so they always override programmatic values.
+2. **Programmatic `configure()` values** — explicit values provided via `configure()`. Used when no matching environment variable is set.
+3. **Default values** — built-in defaults for optional settings: `cookieName: 'wos-session'`, `apiHttps: true`, `cookieMaxAge: 34560000`, and `apiHostname: 'api.workos.com'`.
 
 If a required setting (`clientId`, `redirectUri`, `cookiePassword`) is missing from all three sources, the library throws an error when that value is first accessed.
 
@@ -119,10 +121,6 @@ For a full guide to keyless mode, including PKCE mechanics and dashboard configu
 
 ## Debugging
 
-<Tip>
-  To inspect every resolved configuration value at once, import and call `getFullConfig()`. It returns a plain object with all current settings — useful when you need to confirm which source a value came from. Never log the output in production as it includes `cookiePassword` and `apiKey`.
-</Tip>
-
 To enable per-request debug logging in your loaders, pass `debug: true` to `authkitLoader`:
 
 ```typescript
@@ -134,3 +132,16 @@ export const loader = (args: LoaderFunctionArgs) =>
 ```
 
 When `debug` is enabled, AuthKit logs session validation outcomes, token-refresh events, and feature-flag fallbacks to the server console.
+
+To inspect a single resolved configuration value at runtime, use `getConfig`:
+
+```typescript
+import { getConfig } from '@workos-inc/authkit-react-router';
+
+// Returns the resolved value, checking env vars first, then configure(), then defaults.
+const clientId = getConfig('clientId');
+```
+
+<Warning>
+  Never log configuration values that contain secrets (such as `cookiePassword` or `apiKey`) in production environments.
+</Warning>

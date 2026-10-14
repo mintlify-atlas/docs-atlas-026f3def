@@ -1,5 +1,5 @@
 ---
-title: "Session Management in AuthKit React Router"
+title: "Session Management with AuthKit React Router v0.13"
 sidebarTitle: "Session Management"
 description: "Learn how AuthKit React Router stores sessions in encrypted cookies, automatically refreshes access tokens, and handles transient refresh failures."
 ---
@@ -69,17 +69,13 @@ On a transient failure, `authkitLoader` **preserves** the sealed session cookie.
 Any other error — most commonly a `400 invalid_grant` response indicating the refresh token has been revoked or has expired — is treated as terminal. On a terminal failure, the session cookie is **destroyed** and the user is redirected to WorkOS AuthKit to sign in again.
 
 ```typescript
-import { SessionRefreshError, isTransientRefreshError } from '@workos-inc/authkit-react-router';
-
-// isTransientRefreshError is also exported if you need to classify errors
-// outside of authkitLoader:
-try {
-  // ...some refresh call
-} catch (error) {
-  const transient = isTransientRefreshError(error);
-  // transient === true  → preserve session, retry later
-  // transient === false → destroy session, force re-auth
-}
+// SessionRefreshError is thrown internally by authkitLoader when a token
+// refresh fails. You can use the onSessionRefreshError callback (below) to
+// inspect isTransient and decide whether to log, alert, or override the
+// default redirect behaviour.
+//
+// isTransient === true  → transient failure; session preserved, retry later
+// isTransient === false → terminal failure; session destroyed, user re-authed
 ```
 
 ## Session Refresh Callbacks

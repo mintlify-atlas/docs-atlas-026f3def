@@ -6,7 +6,7 @@ description: "getWorkOS returns the configured WorkOS Node SDK client instance f
 
 `getWorkOS` returns the shared `@workos-inc/node` client instance that AuthKit configures internally. Use it when you need to call WorkOS management APIs that aren't covered by AuthKit's higher-level helpers — for example, listing or creating organizations, fetching a user record directly, or performing any other WorkOS SDK operation from a loader or action.
 
-The client is initialized lazily (on first call) using the same `clientId`, `apiKey`, `apiHostname`, `apiHttps`, and `apiPort` values that the rest of AuthKit reads from [configure](/api-reference/configure) or environment variables.
+The client is a lazy singleton: it is initialized on the first call using the `clientId`, `apiKey`, `apiHostname`, `apiHttps`, and `apiPort` values that AuthKit reads from [`configure`](/api-reference/configure) or environment variables. Every subsequent call returns the same instance.
 
 ## Import
 
@@ -26,7 +26,7 @@ getWorkOS(): WorkOS
   The configured [`@workos-inc/node`](https://github.com/workos/workos-node) `WorkOS` client instance. The same instance is returned on every call (singleton). You can call any method available in the WorkOS Node SDK directly on this object.
 </ResponseField>
 
-## Example
+## Examples
 
 ### Listing organizations
 
@@ -68,11 +68,16 @@ export const loader = (args: LoaderFunctionArgs) =>
 <Warning>
   Management APIs require a WorkOS API key (`WORKOS_API_KEY` or `configure({ apiKey })`). In public-client (keyless) mode, calling management methods on the client — such as `workos.organizations.*` or `workos.userManagement.getUser` — causes the WorkOS Node SDK to throw an `ApiKeyRequiredException`.
 
-  Feature flags (`getFeatureFlagsRuntimeClient`) also require an API key and throw with the message `"Feature flags require a WorkOS API key; set WORKOS_API_KEY or configure({ apiKey }). Public-client (keyless) mode supports sign-in only."` in keyless mode.
+  Feature flags also require an API key. In keyless mode, `getFeatureFlagsRuntimeClient()` throws:
 
-  See [Public client mode](/api-reference/configure#config-options) for the complete list of what works without an API key.
+  ```
+  Feature flags require a WorkOS API key; set WORKOS_API_KEY or configure({ apiKey }).
+  Public-client (keyless) mode supports sign-in only.
+  ```
+
+  See [configure — Public client mode](/api-reference/configure#public-client-keyless-mode) for the complete list of what works without an API key.
 </Warning>
 
 <Note>
-  The `WorkOS` client instance is configured from the same source as the rest of AuthKit. Changing settings via [`configure`](/api-reference/configure) before the first `getWorkOS()` call ensures the client picks up those values. Because the instance is a singleton, settings changed after the first call do not affect the already-created client.
+  The `WorkOS` client instance is a singleton. Settings changed via [`configure`](/api-reference/configure) after the first `getWorkOS()` call do not affect the already-created client. Call `configure()` before any `getWorkOS()` call — or before the first request handler runs — to ensure the client is initialized with the correct values.
 </Note>

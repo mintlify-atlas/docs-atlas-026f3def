@@ -1,7 +1,7 @@
 ---
-title: "withAuth — Low-Level Auth Data Access"
+title: "withAuth — Read Session Auth Without Token Refresh"
 sidebarTitle: "withAuth"
-description: "withAuth reads the current session from cookies and returns user data without triggering token refresh — for API routes and middleware that need raw auth access."
+description: "withAuth reads the session cookie and returns user claims without token refresh — for API routes and middleware that need raw auth access in React Router."
 ---
 
 `withAuth` is a lower-level alternative to `authkitLoader`. Where `authkitLoader` manages the full session lifecycle — verifying the access token, refreshing it if expired, and writing an updated `Set-Cookie` header — `withAuth` simply decrypts and reads the existing session cookie as-is. It performs **no** token refresh, makes **no** changes to cookies, and issues **no** automatic redirects. When a session is present and the access token is still valid, `withAuth` returns the user's claims (including `accessToken` as a direct property). When there is no session or the token has expired, it returns `{ user: null }`.
@@ -34,7 +34,7 @@ withAuth(args: LoaderFunctionArgs): Promise<UserInfo | NoUserInfo>
   The WorkOS `User` object for the authenticated user. Contains `id`, `email`, `firstName`, `lastName`, `profilePictureUrl`, `createdAt`, and other standard profile fields.
 </ResponseField>
 
-<ResponseField name="sessionId" type="string">
+<ResponseField name="sessionId" type="string" required>
   The WorkOS session ID extracted from the `sid` JWT claim.
 </ResponseField>
 
@@ -66,7 +66,7 @@ withAuth(args: LoaderFunctionArgs): Promise<UserInfo | NoUserInfo>
   Set when a WorkOS admin is impersonating this user. Contains `email` and `reason`. `undefined` in all normal sessions.
 </ResponseField>
 
-<ResponseField name="accessToken" type="string">
+<ResponseField name="accessToken" type="string" required>
   The raw access token (JWT) from the decrypted session cookie. Available as a direct property — unlike `authkitLoader`, which keeps the access token server-side and provides it only through the `getAccessToken()` callback.
 </ResponseField>
 

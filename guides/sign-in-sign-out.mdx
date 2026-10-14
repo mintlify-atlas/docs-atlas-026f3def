@@ -1,5 +1,5 @@
 ---
-title: "Sign-In, Sign-Up, and Sign-Out with AuthKit"
+title: "Sign-In, Sign-Up, and Sign-Out in AuthKit React Router"
 sidebarTitle: "Sign-In & Sign-Out"
 description: "Create dedicated redirect routes for sign-in and sign-up using PKCE-protected AuthKit URLs, and implement sign-out with session termination."
 ---
@@ -132,9 +132,9 @@ To configure it, open the [WorkOS dashboard](https://dashboard.workos.com), navi
 - Development: `http://localhost:5173/login`
 - Production: `https://your-app.com/login`
 
-<Important>
+<Warning>
   A configured Initiate Login URI is required for [impersonation](https://workos.com/docs/user-management/impersonation) to work correctly. Without it, WorkOS-initiated flows (such as impersonating a user from the dashboard) redirect directly to your callback URL without a `state` parameter. Because this library enforces PKCE and CSRF verification on every callback, the request is rejected and you will see a `Missing required auth parameter` error.
-</Important>
+</Warning>
 
 ## Migrating from 0.4.x
 

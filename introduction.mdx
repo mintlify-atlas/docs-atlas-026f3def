@@ -41,6 +41,46 @@ AuthKit React Router implements the **OAuth 2.0 authorization-code flow with PKC
 6. **Encrypted session cookie** — the tokens and user profile are sealed into an encrypted `Set-Cookie` header that is written to the browser.
 7. **Subsequent requests** — `authkitLoader` decrypts the session cookie on each request. If the access token has expired, it transparently refreshes it using the refresh token and writes a new `Set-Cookie` header, keeping the user logged in with no visible interruption.
 
+## Public API
+
+The following functions and types are exported from `@workos-inc/authkit-react-router`.
+
+### Loaders
+
+| Export | Description |
+|---|---|
+| `authkitLoader(args, optionsOrCallback?, options?)` | The primary React Router loader helper. Decrypts the session, refreshes expired tokens, and exposes `user`, `sessionId`, `organizationId`, `role`, `permissions`, `entitlements`, `featureFlags`, and `impersonator` via `useLoaderData`. Accepts an optional callback for custom loader logic and an `ensureSignedIn` option to redirect unauthenticated visitors. |
+| `authLoader(options?)` | Returns a React Router loader for the OAuth callback route. Verifies PKCE + CSRF state, exchanges the authorization code for tokens, and writes the encrypted session cookie before redirecting. |
+
+### Authentication Helpers
+
+| Export | Description |
+|---|---|
+| `getSignInUrl(returnPathname?, request?)` | Builds the WorkOS sign-in authorization URL. Returns `{ url: string, headers: { 'Set-Cookie': string } }`. The `headers` must be forwarded on the redirect response so the PKCE cookie reaches the browser. |
+| `getSignUpUrl(returnPathname?, request?)` | Same as `getSignInUrl` but sets `screen_hint=sign-up` on the authorization URL. Returns `{ url: string, headers: { 'Set-Cookie': string } }`. |
+| `signOut(request, options?)` | Ends the current session and redirects the user. Accepts an optional `returnTo` URL (must be configured as an allowed logout redirect in the WorkOS dashboard). |
+| `switchToOrganization(request, organizationId)` | Refreshes the session into the given organizational context. Returns updated auth data or redirects to re-authentication when the organization requires SSO or MFA. |
+| `withAuth(args)` | Low-level helper that decrypts the session without performing token refresh or cookie management. Returns auth data including `accessToken` directly. Useful for API routes or custom authentication flows. |
+| `refreshSession(request, options?)` | Explicitly refreshes the access token using the stored refresh token and returns the updated session data. |
+| `saveSession(sessionData, request)` | Manually creates and persists a session from raw auth data. Useful for custom authentication flows such as email verification or token exchange. |
+
+### Configuration
+
+| Export | Description |
+|---|---|
+| `configure(configOrSource, source?)` | Configures the library with explicit values, a custom environment variable source, or both. Call early in your app's lifecycle before any route loaders run. |
+| `getConfig(key)` | Returns the resolved value for a single configuration key. Checks environment variables first, then programmatic config, then defaults. Throws for missing required keys. |
+| `getWorkOS()` | Returns the configured `WorkOS` client instance from `@workos-inc/node`. Useful for direct management API calls. Requires an API key; throws `ApiKeyRequiredException` in keyless mode. |
+| `getFeatureFlagsRuntimeClient(options?)` | Returns a shared `FeatureFlagsRuntimeClient` instance (one per server process). Requires an API key. Throws in keyless mode. |
+
+### Types
+
+| Export | Description |
+|---|---|
+| `AuthKitConfig` | Union type: `AuthKitConfidentialConfig \| AuthKitPublicConfig`. Discriminated on the presence of `apiKey`. |
+| `AuthKitConfidentialConfig` | Configuration interface for confidential clients that hold a WorkOS API key. Extends the base config with a required `apiKey: string`. |
+| `AuthKitPublicConfig` | Configuration interface for public (keyless) clients. Extends the base config with `apiKey?: never`. |
+
 ## Requirements
 
 | Requirement | Version |

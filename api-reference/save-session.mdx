@@ -65,11 +65,12 @@ saveSession(
 
 ### Email verification flow
 
+`saveSession` returns the updated `Session` with `headers` populated. You must forward those headers in your redirect or response — otherwise the browser never receives the cookie and the user will appear unauthenticated on the next request.
+
 ```ts
 import { redirect } from 'react-router';
 import { getWorkOS, saveSession } from '@workos-inc/authkit-react-router';
 
-// Example: Email verification flow
 async function handleEmailVerification(request: Request) {
   const { code } = await request.json();
 
@@ -79,10 +80,12 @@ async function handleEmailVerification(request: Request) {
     code,
   });
 
-  // Encrypt and persist the session as a cookie
+  // Encrypt and persist the session as a cookie.
+  // The returned `session.headers` contains the Set-Cookie header.
   const session = await saveSession(authResponse, request);
 
-  // Redirect to the dashboard, attaching the Set-Cookie header
+  // Redirect to the dashboard, attaching the Set-Cookie header so
+  // the browser stores the session.
   return redirect('/dashboard', {
     headers: session.headers,
   });

@@ -24,22 +24,15 @@ async function handleEmailVerification(request: Request) {
     code,
   });
 
-  // Persist the session to the AuthKit cookie
-  await saveSession(
-    {
-      accessToken: authResponse.accessToken,
-      refreshToken: authResponse.refreshToken,
-      user: authResponse.user,
-      impersonator: authResponse.impersonator,
-    },
-    request,
-  );
+  // Persist the session to the AuthKit cookie and capture the Set-Cookie header
+  const session = await saveSession(authResponse, request);
 
-  return redirect('/dashboard');
+  // Include the Set-Cookie header so the browser receives the new session cookie
+  return redirect('/dashboard', { headers: session.headers });
 }
 ```
 
-`saveSession` accepts either a `Session` object (with `accessToken`, `refreshToken`, `user`, and optionally `impersonator`) or a full `AuthenticationResponse` from the WorkOS SDK — both shapes are compatible. It writes the encrypted session to the AuthKit cookie and returns the `Session` with a `Set-Cookie` header attached.
+`saveSession` accepts either a full `AuthenticationResponse` from the WorkOS SDK or a `Session` object (with `accessToken`, `refreshToken`, `user`, and optionally `impersonator`) — both shapes are compatible. It writes the encrypted session to the AuthKit cookie and returns the `Session` with a `Set-Cookie` header attached. Pass `session.headers` to the redirect response so the browser receives the new session cookie.
 
 ## Direct WorkOS Client Access
 

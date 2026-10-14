@@ -1,7 +1,7 @@
 ---
-title: "Feature Flags with WorkOS AuthKit Runtime Client"
+title: "Server-Side Feature Flags with AuthKit React Router"
 sidebarTitle: "Feature Flags"
-description: "Evaluate feature flags server-side using the WorkOS Feature Flags runtime client in authkitLoader, independent of JWT claims."
+description: "Evaluate feature flags server-side using the WorkOS Feature Flags runtime client in authkitLoader, keeping flag state in sync independently of JWT claims."
 ---
 
 `authkitLoader` supports two approaches to feature flags: reading flag state directly from the access token's JWT claims, or evaluating flags at request time using the WorkOS Feature Flags runtime client. The JWT-based approach is zero-configuration but only reflects changes after a token refresh. The runtime client evaluates flags independently of the session lifecycle, keeping flag state in sync in the background.
@@ -98,7 +98,7 @@ Options are applied **only when the client is created for the first time**. Subs
   Feature flags require a WorkOS API key. Set `WORKOS_API_KEY` in your environment or pass `apiKey`
   to `configure()`. Calling `getFeatureFlagsRuntimeClient()` in public-client (keyless) mode throws:
 
-  ```
+  ```text
   Feature flags require a WorkOS API key; set WORKOS_API_KEY or configure({ apiKey }). Public-client (keyless) mode supports sign-in only.
   ```
 

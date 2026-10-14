@@ -1,7 +1,7 @@
 ---
-title: "signOut — Terminate the User Session"
-sidebarTitle: "signOut"
-description: "signOut destroys the session cookie, calls the WorkOS logout endpoint, and redirects the user — with an optional returnTo URL for post-logout destination."
+title: "signOut — End the WorkOS Session and Redirect the User"
+sidebarTitle: "Sign Out"
+description: "signOut destroys the session cookie, calls the WorkOS logout endpoint, and redirects the user, with an optional returnTo URL for post-logout destination."
 ---
 
 `signOut` terminates the user's WorkOS session, destroys the encrypted session cookie on the browser, and redirects the user. By default, WorkOS redirects to the homepage URL configured in your WorkOS dashboard under **Redirect** settings. An optional `returnTo` URL lets you override that destination — the value must be registered as an allowed logout redirect in your WorkOS dashboard.
@@ -33,6 +33,14 @@ signOut(request: Request, options?: { returnTo?: string }): Promise<Response>
 <ResponseField name="Response" type="Response">
   A redirect `Response` to the WorkOS logout endpoint. WorkOS then clears its own session state and redirects the user to either the `returnTo` URL or the default post-logout destination configured in your dashboard. The response also instructs the browser to expire the session cookie.
 </ResponseField>
+
+## Internal behavior
+
+`signOut` delegates to `terminateSession`, which performs three steps before issuing the redirect:
+
+1. **Destroys the session cookie** — calls `destroySession` on the encrypted session store, which sets the session cookie to an expired value so the browser discards it on the next response.
+2. **Cleans up orphan PKCE cookies** — calls `getPKCECleanupCookieStrings` to expire any leftover `wos-auth-verifier-*` cookies from abandoned OAuth flows. Without this cleanup, stale per-flow cookies can accumulate and eventually exceed the browser's per-domain cookie limit.
+3. **Redirects to the WorkOS logout URL** — if a `sessionId` is present in the access token, the user is sent to the WorkOS `getLogoutUrl` endpoint (which clears the server-side session), followed by a redirect to `returnTo` or the dashboard-configured default. If no `sessionId` is found, the user is redirected directly to `returnTo` or `/`.
 
 ## Usage
 

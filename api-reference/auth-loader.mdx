@@ -1,5 +1,5 @@
 ---
-title: "authLoader — WorkOS OAuth Callback Handler"
+title: "authLoader — Handle the WorkOS OAuth Callback Route"
 sidebarTitle: "authLoader"
 description: "authLoader handles the WorkOS OAuth callback route, exchanging the authorization code for tokens and writing the encrypted session cookie."
 ---
@@ -58,8 +58,8 @@ authLoader(options?: HandleAuthOptions): LoaderFunction
       The organization the user authenticated into, if applicable. `null` when no organization context is present.
     </ParamField>
 
-    <ParamField path="authenticationMethod" type="string" required>
-      The method used to authenticate, e.g. `"GoogleOAuth"`, `"MagicAuth"`, `"Password"`. Mirrors `AuthenticationResponse['authenticationMethod']` from the WorkOS Node SDK.
+    <ParamField path="authenticationMethod" type="string">
+      The method used to authenticate, e.g. `"GoogleOAuth"`, `"MagicAuth"`, `"Password"`. Mirrors `AuthenticationResponse['authenticationMethod']` from the WorkOS Node SDK. May be `undefined` if the WorkOS API did not return this field.
     </ParamField>
 
     <ParamField path="state" type="string">

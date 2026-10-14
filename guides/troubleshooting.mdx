@@ -1,8 +1,10 @@
 ---
-title: "Troubleshooting AuthKit React Router"
+title: "Troubleshooting Common AuthKit React Router Errors"
 sidebarTitle: "Troubleshooting"
 description: "Fix common AuthKit React Router errors including Missing required auth parameter, Auth cookie missing, and session refresh failures."
 ---
+
+This page covers the most common errors you may encounter when using `@workos-inc/authkit-react-router`, along with their root causes and step-by-step fixes. If you need detailed diagnostics, use the `debug: true` option described in the [Debugging](#debugging) section below.
 
 ## Authentication Errors
 
@@ -172,7 +174,7 @@ description: "Fix common AuthKit React Router errors including Missing required 
     Calling `getFeatureFlagsRuntimeClient()` throws the following error when `WORKOS_API_KEY` is not set:
 
     ```
-    Feature flags require a WorkOS API key; set WORKOS_API_KEY or configure({ apiKey }) to use them.
+    Feature flags require a WorkOS API key; set WORKOS_API_KEY or configure({ apiKey }). Public-client (keyless) mode supports sign-in only.
     ```
 
     This happens because `getFeatureFlagsRuntimeClient()` uses a server-side WorkOS management API that requires a secret key to authenticate. Without `WORKOS_API_KEY`, AuthKit operates in **public client (keyless) mode**, which supports sign-in flows but not management API calls.
@@ -222,17 +224,19 @@ export const loader = (args: LoaderFunctionArgs) =>
 
 When `debug: true` is active, any feature flag evaluation fallback from the runtime client to the JWT claim also emits a warning, making it easier to detect transient runtime-client failures in development.
 
-### Inspect the resolved configuration with `getFullConfig`
+### Inspect individual configuration values with `getConfig`
 
-`getFullConfig` returns the complete resolved configuration object — the merged result of programmatic `configure()` calls, environment variables, and defaults. Use it during debugging to verify that the values AuthKit is actually using match what you expect.
+`getConfig` retrieves a single resolved configuration value — the merged result of programmatic `configure()` calls, environment variables, and defaults. Use it during debugging to verify that the values AuthKit is actually using match what you expect.
 
 ```ts
-import { getFullConfig } from '@workos-inc/authkit-react-router';
+import { getConfig } from '@workos-inc/authkit-react-router';
 
 // In a server-side loader or script — for debugging only
-console.log(getFullConfig());
+console.log('clientId:', getConfig('clientId'));
+console.log('redirectUri:', getConfig('redirectUri'));
+console.log('cookieName:', getConfig('cookieName'));
 ```
 
 <Warning>
-  **Never call `getFullConfig()` in production logging or return its output to the client.** The resolved configuration includes your `cookiePassword` and, if set, your `apiKey`. Logging these values exposes secrets that could be used to decrypt session cookies or make authenticated WorkOS API calls.
+  **Never log `cookiePassword` or `apiKey` in production or return them to the client.** These values can be used to decrypt session cookies or make authenticated WorkOS API calls. Only log non-secret configuration keys during debugging.
 </Warning>
